@@ -4,6 +4,7 @@ import TopNav from './components/TopNav';
 import Sidebar from './components/Sidebar';
 import ClientDetail from './components/ClientDetail';
 import DashboardView from './components/DashboardView';
+import WarningsView from './components/WarningsView';
 import { GET_CLIENTS, GET_DASHBOARDS } from './graphql/queries';
 import './styles/theme.css';
 import './styles/App.css';
@@ -31,8 +32,11 @@ function App() {
     setActiveTab(tab);
     if (tab === 'information') {
       setSelectedDashboardId(null);
-    } else {
+    } else if (tab === 'dashboards') {
       setSelectedClientId(null);
+    } else if (tab === 'warnings') {
+      setSelectedClientId(null);
+      setSelectedDashboardId(null);
     }
   };
 
@@ -45,6 +49,10 @@ function App() {
   };
 
   const renderSidebar = () => {
+    if (activeTab === 'warnings') {
+      return null; // No sidebar for warnings
+    }
+
     if (activeTab === 'information') {
       if (clientsLoading) {
         return (
@@ -125,8 +133,10 @@ function App() {
   const renderContent = () => {
     if (activeTab === 'information') {
       return <ClientDetail clientId={selectedClientId} />;
-    } else {
+    } else if (activeTab === 'dashboards') {
       return <DashboardView dashboardId={selectedDashboardId} />;
+    } else if (activeTab === 'warnings') {
+      return <WarningsView />;
     }
   };
 

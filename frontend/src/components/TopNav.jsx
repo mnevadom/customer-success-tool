@@ -6,6 +6,12 @@ const TopNav = ({ activeTab, onTabChange }) => {
       <div className="top-nav-title">Customer Success</div>
       <div className="top-nav-tabs">
         <button
+          className={`top-nav-tab ${activeTab === 'warnings' ? 'active' : ''}`}
+          onClick={() => onTabChange('warnings')}
+        >
+          ⚠️ WARNINGS
+        </button>
+        <button
           className={`top-nav-tab ${activeTab === 'information' ? 'active' : ''}`}
           onClick={() => onTabChange('information')}
         >
