@@ -115,10 +115,17 @@ func (sf *SalesforceClient) Login() error {
 
 	loginURL := sf.LoginURL + "/services/oauth2/token"
 
+	clientID := os.Getenv("SF_CLIENT_ID")
+	clientSecret := os.Getenv("SF_CLIENT_SECRET")
+
+	if clientID == "" || clientSecret == "" {
+		return fmt.Errorf("SF_CLIENT_ID and SF_CLIENT_SECRET must be configured")
+	}
+
 	data := url.Values{}
 	data.Set("grant_type", "password")
-	data.Set("client_id", "3MVG9pRzvMkjMb6lZlt3YjDQwe.fSt6iIwGJgqGQBqEpRo1LAl7GwQWNvKVZP4M5TqYjqL5TjYFqVPY_ZqFr3") // Connected App Client ID
-	data.Set("client_secret", "1234567890123456789") // Connected App Client Secret
+	data.Set("client_id", clientID)
+	data.Set("client_secret", clientSecret)
 	data.Set("username", sf.Username)
 	data.Set("password", sf.Password+sf.Token)
 

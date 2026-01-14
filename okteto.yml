@@ -39,8 +39,12 @@ deploy:
         --set env[2].value="${SF_PASSWORD:-}" \
         --set env[3].name="SF_SECURITY_TOKEN" \
         --set env[3].value="${SF_SECURITY_TOKEN:-}" \
-        --set env[4].name="SF_LOGIN_URL" \
-        --set env[4].value="${SF_LOGIN_URL:-https://login.salesforce.com}" \
+        --set env[4].name="SF_CLIENT_ID" \
+        --set env[4].value="${SF_CLIENT_ID:-}" \
+        --set env[5].name="SF_CLIENT_SECRET" \
+        --set env[5].value="${SF_CLIENT_SECRET:-}" \
+        --set env[6].name="SF_LOGIN_URL" \
+        --set env[6].value="${SF_LOGIN_URL:-https://login.salesforce.com}" \
         --wait
 
   - name: Deploy thena-sync with Helm
