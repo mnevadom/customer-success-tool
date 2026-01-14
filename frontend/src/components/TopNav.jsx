@@ -15,7 +15,7 @@ const TopNav = ({ activeTab, onTabChange }) => {
           className={`top-nav-tab ${activeTab === 'information' ? 'active' : ''}`}
           onClick={() => onTabChange('information')}
         >
-          INFORMATION
+          CUSTOMERS
         </button>
         <button
           className={`top-nav-tab ${activeTab === 'dashboards' ? 'active' : ''}`}
