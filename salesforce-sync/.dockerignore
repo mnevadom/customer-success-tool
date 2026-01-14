@@ -1,0 +1,11 @@
+node_modules
+npm-debug.log
+.env
+.env.example
+*.md
+.git
+.gitignore
+chart/
+server.js
+package.json
+package-lock.json

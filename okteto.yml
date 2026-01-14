@@ -1,0 +1,63 @@
+build:
+  backend:
+    context: ./backend
+  frontend:
+    context: ./frontend
+    target: development
+  salesforce-sync:
+    context: ./salesforce-sync
+
+deploy:
+  - name: Deploy backend with Helm
+    command: |
+      helm upgrade --install backend ./backend/chart \
+        --set image.repository=${OKTETO_BUILD_BACKEND_IMAGE%:*} \
+        --set image.tag=${OKTETO_BUILD_BACKEND_IMAGE##*:} \
+        --wait
+
+  - name: Deploy frontend with Helm
+    command: |
+      helm upgrade --install frontend ./frontend/chart \
+        --set image.repository=${OKTETO_BUILD_FRONTEND_IMAGE%:*} \
+        --set image.tag=${OKTETO_BUILD_FRONTEND_IMAGE##*:} \
+        --set env[0].name="VITE_BACKEND_URL" \
+        --set env[0].value="https://backend-${OKTETO_NAMESPACE}.${OKTETO_DOMAIN}" \
+        --wait
+
+  - name: Deploy salesforce-sync with Helm
+    command: |
+      helm upgrade --install salesforce-sync ./salesforce-sync/chart \
+        --set image.repository=${OKTETO_BUILD_SALESFORCE_SYNC_IMAGE%:*} \
+        --set image.tag=${OKTETO_BUILD_SALESFORCE_SYNC_IMAGE##*:} \
+        --set env[0].name="PORT" \
+        --set env[0].value="9000" \
+        --set env[1].name="SF_USERNAME" \
+        --set env[1].value="${SF_USERNAME:-}" \
+        --set env[2].name="SF_PASSWORD" \
+        --set env[2].value="${SF_PASSWORD:-}" \
+        --set env[3].name="SF_SECURITY_TOKEN" \
+        --set env[3].value="${SF_SECURITY_TOKEN:-}" \
+        --set env[4].name="SF_LOGIN_URL" \
+        --set env[4].value="${SF_LOGIN_URL:-https://login.salesforce.com}" \
+        --wait
+
+dev:
+  backend:
+    command: bash
+    workdir: /app
+    sync:
+      - ./backend:/app
+    forward:
+      - 8080:8080
+    environment:
+      - PORT=8080
+
+  frontend:
+    command: npm run dev
+    workdir: /app
+    sync:
+      - ./frontend:/app
+    forward:
+      - 3000:3000
+    environment:
+      - VITE_BACKEND_URL=http://backend:8080
