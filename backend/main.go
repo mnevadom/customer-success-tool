@@ -318,6 +318,11 @@ var mockDashboards = []Dashboard{
 			},
 		},
 	},
+	{
+		ID:   "dashboard-3",
+		Name: "Customer Tasks Board",
+		Widgets: []Widget{},
+	},
 }
 
 // Helper to find client by ID

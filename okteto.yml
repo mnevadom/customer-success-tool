@@ -6,6 +6,8 @@ build:
     target: development
   salesforce-sync:
     context: ./salesforce-sync
+  thena-sync:
+    context: ./thena-sync
 
 deploy:
   - name: Deploy backend with Helm
@@ -39,6 +41,19 @@ deploy:
         --set env[3].value="${SF_SECURITY_TOKEN:-}" \
         --set env[4].name="SF_LOGIN_URL" \
         --set env[4].value="${SF_LOGIN_URL:-https://login.salesforce.com}" \
+        --wait
+
+  - name: Deploy thena-sync with Helm
+    command: |
+      helm upgrade --install thena-sync ./thena-sync/chart \
+        --set image.repository=${OKTETO_BUILD_THENA_SYNC_IMAGE%:*} \
+        --set image.tag=${OKTETO_BUILD_THENA_SYNC_IMAGE##*:} \
+        --set env[0].name="PORT" \
+        --set env[0].value="9100" \
+        --set env[1].name="THENA_API_KEY" \
+        --set env[1].value="${THENA_API_KEY:-}" \
+        --set env[2].name="THENA_BASE_URL" \
+        --set env[2].value="${THENA_BASE_URL:-https://bolt.thena.ai}" \
         --wait
 
 dev:

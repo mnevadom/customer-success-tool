@@ -1,0 +1,49 @@
+replicaCount: 1
+
+image:
+  repository: okteto.dev/thena-sync
+  pullPolicy: Always
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 9100
+
+ingress:
+  enabled: true
+  annotations:
+    dev.okteto.com/generate-host: "true"
+  hosts:
+    - paths:
+      - path: /
+        pathType: Prefix
+
+env:
+  - name: PORT
+    value: "9100"
+  - name: THENA_API_KEY
+    value: ""
+  - name: THENA_BASE_URL
+    value: "https://bolt.thena.ai"
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 9100
+  initialDelaySeconds: 30
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 9100
+  initialDelaySeconds: 5
+  periodSeconds: 5

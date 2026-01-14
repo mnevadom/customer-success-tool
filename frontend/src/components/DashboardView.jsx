@@ -1,6 +1,7 @@
 import React from 'react';
 import { useQuery } from '@apollo/client';
 import { GET_DASHBOARD } from '../graphql/queries';
+import KanbanBoard from './KanbanBoard';
 
 const DashboardView = ({ dashboardId }) => {
   const { loading, error, data } = useQuery(GET_DASHBOARD, {
@@ -45,6 +46,12 @@ const DashboardView = ({ dashboardId }) => {
   }
 
   const { dashboard } = data;
+
+  // If dashboard name contains "Tasks" or "Kanban", show Kanban board
+  if (dashboard.name.toLowerCase().includes('tasks') ||
+      dashboard.name.toLowerCase().includes('kanban')) {
+    return <KanbanBoard dashboardId={dashboardId} />;
+  }
 
   const renderWidgetContent = (widget) => {
     switch (widget.type) {
