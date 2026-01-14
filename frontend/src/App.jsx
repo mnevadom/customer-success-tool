@@ -5,12 +5,13 @@ import Sidebar from './components/Sidebar';
 import ClientDetail from './components/ClientDetail';
 import DashboardView from './components/DashboardView';
 import WarningsView from './components/WarningsView';
+import OverviewView from './components/OverviewView';
 import { GET_CLIENTS, GET_DASHBOARDS } from './graphql/queries';
 import './styles/theme.css';
 import './styles/App.css';
 
 function App() {
-  const [activeTab, setActiveTab] = useState('information');
+  const [activeTab, setActiveTab] = useState('overview');
   const [selectedClientId, setSelectedClientId] = useState(null);
   const [selectedDashboardId, setSelectedDashboardId] = useState(null);
 
@@ -34,7 +35,7 @@ function App() {
       setSelectedDashboardId(null);
     } else if (tab === 'dashboards') {
       setSelectedClientId(null);
-    } else if (tab === 'warnings') {
+    } else if (tab === 'warnings' || tab === 'overview') {
       setSelectedClientId(null);
       setSelectedDashboardId(null);
     }
@@ -49,8 +50,8 @@ function App() {
   };
 
   const renderSidebar = () => {
-    if (activeTab === 'warnings') {
-      return null; // No sidebar for warnings
+    if (activeTab === 'warnings' || activeTab === 'overview') {
+      return null; // No sidebar for warnings and overview
     }
 
     if (activeTab === 'information') {
@@ -131,7 +132,9 @@ function App() {
   };
 
   const renderContent = () => {
-    if (activeTab === 'information') {
+    if (activeTab === 'overview') {
+      return <OverviewView />;
+    } else if (activeTab === 'information') {
       return <ClientDetail clientId={selectedClientId} />;
     } else if (activeTab === 'dashboards') {
       return <DashboardView dashboardId={selectedDashboardId} />;

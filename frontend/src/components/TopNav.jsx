@@ -6,10 +6,10 @@ const TopNav = ({ activeTab, onTabChange }) => {
       <div className="top-nav-title">Customer Success</div>
       <div className="top-nav-tabs">
         <button
-          className={`top-nav-tab ${activeTab === 'warnings' ? 'active' : ''}`}
-          onClick={() => onTabChange('warnings')}
+          className={`top-nav-tab ${activeTab === 'overview' ? 'active' : ''}`}
+          onClick={() => onTabChange('overview')}
         >
-          ⚠️ WARNINGS
+          OVERVIEW
         </button>
         <button
           className={`top-nav-tab ${activeTab === 'information' ? 'active' : ''}`}
@@ -22,6 +22,12 @@ const TopNav = ({ activeTab, onTabChange }) => {
           onClick={() => onTabChange('dashboards')}
         >
           DASHBOARDS
+        </button>
+        <button
+          className={`top-nav-tab ${activeTab === 'warnings' ? 'active' : ''}`}
+          onClick={() => onTabChange('warnings')}
+        >
+          ⚠️ WARNINGS
         </button>
       </div>
     </div>
