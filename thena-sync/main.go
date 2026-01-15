@@ -492,33 +492,43 @@ type ThenaWebhookRequest struct {
 }
 
 // extractRequestObject tries to find the request object from various payload structures
-func extractRequestObject(body []byte) (map[string]interface{}, error) {
+// Returns: (requestObject, fullPayload, error)
+func extractRequestObject(body []byte) (map[string]interface{}, map[string]interface{}, error) {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("invalid JSON: %v", err)
+		return nil, nil, fmt.Errorf("invalid JSON: %v", err)
 	}
 
-	// Check if this is the request object directly (has requestId or thena_id or status)
+	// Try extraction in order of priority:
+
+	// A) Check if this is the request object directly (has requestId or thena_id or status)
 	if hasRequestFields(raw) {
-		return raw, nil
+		return raw, raw, nil
 	}
 
-	// Check if data field exists and contains request
+	// B) Check if data field exists and contains request
 	if data, ok := raw["data"].(map[string]interface{}); ok {
 		if hasRequestFields(data) {
-			return data, nil
+			return data, raw, nil
 		}
 
-		// Check if data.request exists
+		// C) Check if data.request exists
 		if request, ok := data["request"].(map[string]interface{}); ok {
 			if hasRequestFields(request) {
-				return request, nil
+				return request, raw, nil
 			}
 		}
 	}
 
+	// D) Check if body.request exists and contains request fields
+	if request, ok := raw["request"].(map[string]interface{}); ok {
+		if hasRequestFields(request) {
+			return request, raw, nil
+		}
+	}
+
 	// Unknown structure, return raw with indication
-	return raw, fmt.Errorf("unknown payload shape")
+	return raw, raw, fmt.Errorf("unknown payload shape")
 }
 
 // hasRequestFields checks if a map contains typical request fields
@@ -529,6 +539,43 @@ func hasRequestFields(m map[string]interface{}) bool {
 	return hasRequestID || hasThenaID || hasStatus
 }
 
+// extractEventID tries to find eventId from various locations in the payload
+func extractEventID(requestData map[string]interface{}, fullPayload map[string]interface{}) string {
+	// Try these keys in order on the request object first
+	requestKeys := []string{"eventId", "event_id", "id"}
+	for _, key := range requestKeys {
+		if val, ok := requestData[key]; ok && val != nil {
+			if str, ok := val.(string); ok && str != "" {
+				return str
+			}
+		}
+	}
+
+	// Try on the full payload (top-level)
+	fullKeys := []string{"eventId", "event_id", "id"}
+	for _, key := range fullKeys {
+		if val, ok := fullPayload[key]; ok && val != nil {
+			if str, ok := val.(string); ok && str != "" {
+				return str
+			}
+		}
+	}
+
+	// Try data.eventId and data.id
+	if data, ok := fullPayload["data"].(map[string]interface{}); ok {
+		dataKeys := []string{"eventId", "event_id", "id"}
+		for _, key := range dataKeys {
+			if val, ok := data[key]; ok && val != nil {
+				if str, ok := val.(string); ok && str != "" {
+					return str
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
 // getTopLevelKeys returns the top-level keys of a map
 func getTopLevelKeys(m map[string]interface{}) []string {
 	keys := make([]string, 0, len(m))
@@ -536,6 +583,16 @@ func getTopLevelKeys(m map[string]interface{}) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// getStringField safely extracts a string field from a map
+func getStringField(m map[string]interface{}, key string) string {
+	if val, ok := m[key]; ok && val != nil {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
 }
 
 // truncateString truncates a string to maxLen characters and removes newlines
@@ -552,7 +609,7 @@ func truncateString(s string, maxLen int) string {
 }
 
 // logWebhookSummary logs a concise summary of the webhook request
-func logWebhookSummary(requestData map[string]interface{}) {
+func logWebhookSummary(requestData map[string]interface{}, fullPayload map[string]interface{}) {
 	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	log.Println("[THENA WEBHOOK SUMMARY]")
 
@@ -587,11 +644,14 @@ func logWebhookSummary(requestData map[string]interface{}) {
 		return nil
 	}
 
+	// Extract eventId from multiple possible locations
+	eventId := extractEventID(requestData, fullPayload)
+
 	// IDs
 	log.Printf("  requestId=%s thena_id=%s eventId=%s",
 		getInt("requestId"),
 		getString("thena_id"),
-		getString("eventId"))
+		eventId)
 
 	// Status
 	subStatusDetails := getObject("subStatusDetails")
@@ -745,20 +805,30 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract request object from payload
-	requestData, err := extractRequestObject(body)
+	requestData, fullPayload, err := extractRequestObject(body)
 	if err != nil {
 		if err.Error() == "unknown payload shape" {
-			// Log unknown payload structure
+			// Log unknown payload structure with helpful context
 			log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 			log.Printf("📥 Webhook received: %s %s", r.Method, r.URL.Path)
 			log.Printf("⚠️  Unknown payload shape. Top-level keys: %v", getTopLevelKeys(requestData))
+
+			// Log helpful string fields for categorization
+			action := getStringField(requestData, "action")
+			event := getStringField(requestData, "event")
+			eventType := getStringField(requestData, "type")
+
+			if action != "" || event != "" || eventType != "" {
+				log.Printf("   Event metadata: action=%q event=%q type=%q", action, event, eventType)
+			}
+
 			log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 		} else {
 			log.Printf("❌ Failed to parse webhook payload: %v", err)
 		}
 	} else {
 		// Log concise summary
-		logWebhookSummary(requestData)
+		logWebhookSummary(requestData, fullPayload)
 	}
 
 	// Optionally log full payload if LOG_FULL_PAYLOAD is set
