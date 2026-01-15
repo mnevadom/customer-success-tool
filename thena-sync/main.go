@@ -608,6 +608,54 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
+// computeThenaUrl derives the Thena UI link from available fields
+func computeThenaUrl(requestData map[string]interface{}) string {
+	// Helper to safely get string value
+	getString := func(key string) string {
+		if val, ok := requestData[key]; ok && val != nil {
+			return fmt.Sprintf("%v", val)
+		}
+		return ""
+	}
+
+	requestID := getString("requestId")
+	if requestID == "" {
+		return "" // Can't construct URL without requestId
+	}
+
+	permalink := getString("permalink")
+	requestLink := getString("requestLink")
+	teamID := getString("team_id")
+
+	var thenaUrl string
+
+	// 1) Identify the Thena UI link
+	if requestLink != "" && strings.Contains(requestLink, "app.thena.ai") {
+		thenaUrl = requestLink
+	} else if permalink != "" && strings.Contains(permalink, "app.thena.ai") {
+		thenaUrl = permalink
+	} else {
+		// 3) Fallback construction
+		thenaUrl = fmt.Sprintf("https://app.thena.ai/requests?requestId=%s", requestID)
+		if teamID != "" {
+			thenaUrl += "&teamId=" + teamID
+		}
+		return thenaUrl
+	}
+
+	// 4) Normalization: add teamId if missing but available
+	if !strings.Contains(thenaUrl, "teamId=") && teamID != "" && strings.Contains(thenaUrl, "requestId") {
+		// Add teamId parameter
+		if strings.Contains(thenaUrl, "?") {
+			thenaUrl += "&teamId=" + teamID
+		} else {
+			thenaUrl += "?teamId=" + teamID
+		}
+	}
+
+	return thenaUrl
+}
+
 // logWebhookSummary logs a concise summary of the webhook request
 func logWebhookSummary(requestData map[string]interface{}, fullPayload map[string]interface{}) {
 	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -738,6 +786,12 @@ func logWebhookSummary(requestData map[string]interface{}, fullPayload map[strin
 	if description != "" {
 		truncated := truncateString(description, 200)
 		log.Printf("  description=\"%s\"", truncated)
+	}
+
+	// Thena URL (computed from available fields)
+	thenaUrl := computeThenaUrl(requestData)
+	if thenaUrl != "" {
+		log.Printf("  thenaUrl=%s", thenaUrl)
 	}
 
 	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
