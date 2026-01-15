@@ -361,6 +361,11 @@ var mockDashboards = []Dashboard{
 		Name: "Customer Tasks Board",
 		Widgets: []Widget{},
 	},
+	{
+		ID:   "dashboard-thena",
+		Name: "Thena Board",
+		Widgets: []Widget{},
+	},
 }
 
 // Helper to find client by ID

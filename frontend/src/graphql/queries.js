@@ -58,3 +58,37 @@ export const GET_DASHBOARD = gql`
     }
   }
 `;
+
+export const GET_THENA_REQUESTS = gql`
+  query GetThenaRequests {
+    thenaRequests {
+      id
+      requestId
+      thenaId
+      eventId
+      status
+      subStatus
+      subStatusName
+      subStatusDesc
+      customerName
+      crmId
+      crmName
+      channelId
+      channelName
+      permalink
+      requestLink
+      thenaUrl
+      assignedToId
+      assignedToName
+      assignedToEmail
+      requestorId
+      requestorName
+      requestorEmail
+      createdAt
+      updatedAt
+      replyCount
+      description
+      receivedAt
+    }
+  }
+`;

@@ -6,6 +6,7 @@ import ClientDetail from './components/ClientDetail';
 import DashboardView from './components/DashboardView';
 import WarningsView from './components/WarningsView';
 import OverviewView from './components/OverviewView';
+import ThenaBoardView from './components/ThenaBoardView';
 import { GET_CLIENTS, GET_DASHBOARDS } from './graphql/queries';
 import './styles/theme.css';
 import './styles/App.css';
@@ -137,6 +138,10 @@ function App() {
     } else if (activeTab === 'information') {
       return <ClientDetail clientId={selectedClientId} />;
     } else if (activeTab === 'dashboards') {
+      // Check if it's the Thena Board dashboard
+      if (selectedDashboardId === 'dashboard-thena') {
+        return <ThenaBoardView />;
+      }
       return <DashboardView dashboardId={selectedDashboardId} />;
     } else if (activeTab === 'warnings') {
       return <WarningsView />;
