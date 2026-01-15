@@ -1,12 +1,16 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -406,7 +410,7 @@ func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, x-api-key, x-thena-signature")
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
@@ -415,6 +419,119 @@ func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 
 		next(w, r)
 	}
+}
+
+// Webhook handlers
+
+// verifyWebhookSignature validates the webhook request
+func verifyWebhookSignature(body []byte, apiKey string, signature string, webhookSecret string) bool {
+	if webhookSecret == "" {
+		log.Println("⚠️  THENA_WEBHOOK_SECRET not set, skipping verification")
+		return true
+	}
+
+	// Option A: Check x-api-key header
+	if apiKey != "" && apiKey == webhookSecret {
+		log.Println("✅ Verified via x-api-key header")
+		return true
+	}
+
+	// Option B: Check x-thena-signature header (HMAC-SHA256)
+	if signature != "" {
+		mac := hmac.New(sha256.New, []byte(webhookSecret))
+		mac.Write(body)
+		expectedSignature := hex.EncodeToString(mac.Sum(nil))
+
+		if hmac.Equal([]byte(signature), []byte(expectedSignature)) {
+			log.Println("✅ Verified via x-thena-signature header")
+			return true
+		}
+	}
+
+	return false
+}
+
+// webhookHandler handles POST /webhooks/thena
+func webhookHandler(w http.ResponseWriter, r *http.Request) {
+	// Only allow POST
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte("Method not allowed"))
+		return
+	}
+
+	// Read raw body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("❌ Error reading webhook body: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Error reading body"))
+		return
+	}
+	defer r.Body.Close()
+
+	// Log request details
+	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	log.Printf("📥 Webhook received: %s %s", r.Method, r.URL.Path)
+	log.Printf("🌐 Remote Address: %s", r.RemoteAddr)
+	log.Println("📋 Headers:")
+
+	// Log important headers
+	headers := []string{"Content-Type", "User-Agent", "X-Api-Key", "X-Thena-Signature"}
+	for _, h := range headers {
+		if val := r.Header.Get(h); val != "" {
+			// Mask sensitive headers in logs
+			if strings.ToLower(h) == "x-api-key" && len(val) > 8 {
+				log.Printf("  %s: %s...%s", h, val[:4], val[len(val)-4:])
+			} else {
+				log.Printf("  %s: %s", h, val)
+			}
+		}
+	}
+
+	// Log any x-* headers
+	for name, values := range r.Header {
+		if strings.HasPrefix(strings.ToLower(name), "x-") && !strings.Contains(strings.ToLower(name), "key") {
+			log.Printf("  %s: %s", name, strings.Join(values, ", "))
+		}
+	}
+
+	// Verify webhook signature if secret is set
+	webhookSecret := os.Getenv("THENA_WEBHOOK_SECRET")
+	apiKey := r.Header.Get("X-Api-Key")
+	signature := r.Header.Get("X-Thena-Signature")
+
+	if !verifyWebhookSignature(body, apiKey, signature, webhookSecret) {
+		log.Println("❌ Invalid webhook signature")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte("invalid signature"))
+		return
+	}
+
+	// Log body
+	log.Println("📦 Body:")
+
+	// Try to pretty-print if it's valid JSON
+	var jsonData interface{}
+	if err := json.Unmarshal(body, &jsonData); err == nil {
+		prettyJSON, _ := json.MarshalIndent(jsonData, "", "  ")
+		log.Println(string(prettyJSON))
+	} else {
+		// Not JSON or invalid, just log as string
+		log.Printf("  (Raw) %s", string(body))
+	}
+
+	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+	// Respond 200 OK
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
+}
+
+// healthzHandler handles GET /healthz
+func healthzHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("ok"))
 }
 
 func main() {
@@ -430,14 +547,25 @@ func main() {
 
 	// Setup routes
 	http.HandleFunc("/health", enableCORS(healthHandler))
+	http.HandleFunc("/healthz", healthzHandler)
+	http.HandleFunc("/webhooks/thena", webhookHandler)
 	http.HandleFunc("/api/test-connection", enableCORS(testConnectionHandler))
 	http.HandleFunc("/api/requests", enableCORS(getRequestsHandler))
 	http.HandleFunc("/api/requests/", enableCORS(getRequestByIDHandler))
 	http.HandleFunc("/api/cards-by-status", enableCORS(getCardsByStatusHandler))
 
 	port := getEnvOrDefault("PORT", "9100")
+	webhookSecret := os.Getenv("THENA_WEBHOOK_SECRET")
+
 	log.Printf("Starting Thena Sync service on port %s", port)
 	log.Printf("Base URL: %s", thenaClient.BaseURL)
+	log.Printf("Webhook endpoint: /webhooks/thena")
+
+	if webhookSecret == "" {
+		log.Println("⚠️  THENA_WEBHOOK_SECRET not set - webhooks will accept all requests without verification")
+	} else {
+		log.Println("✅ THENA_WEBHOOK_SECRET configured - webhook signature verification enabled")
+	}
 
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
