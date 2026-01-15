@@ -11,13 +11,18 @@ Go-based REST API service for integrating with [Thena.ai](https://thena.ai) to f
 - ✅ CORS enabled for frontend integration
 - ✅ Health check endpoint
 - ✅ Connection testing
+- ✅ Webhook receiver for Thena events
+- ✅ Concise webhook payload logging
+- ✅ Optional webhook signature verification
 
 ## Environment Variables
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `THENA_API_KEY` | Your Thena API key | - | Yes |
+| `THENA_API_KEY` | Your Thena API key | - | Yes (for API calls) |
 | `THENA_BASE_URL` | Thena API base URL | `https://bolt.thena.ai` | No |
+| `THENA_WEBHOOK_SECRET` | Shared secret for webhook verification | - | No |
+| `LOG_FULL_PAYLOAD` | Log full webhook payloads (debug mode) | `false` | No |
 | `PORT` | Service port | `9100` | No |
 
 ## Getting Your Thena API Key
@@ -128,6 +133,63 @@ Fetches all requests grouped by their status column.
 }
 ```
 
+### Webhook Endpoint
+```bash
+POST /webhooks/thena
+```
+Receives webhook events from Thena and logs a concise summary.
+
+**Headers:**
+- `Content-Type: application/json`
+- `X-Api-Key: your-webhook-secret` (optional, for verification)
+- `X-Thena-Signature: hmac-sha256-signature` (optional, for verification)
+
+**Response:**
+- `200 OK` - Webhook received successfully
+- `401 Unauthorized` - Invalid signature (if THENA_WEBHOOK_SECRET is set)
+- `400 Bad Request` - Invalid request body
+
+**Webhook Logging:**
+
+By default, the service logs a **concise summary** of each webhook, extracting key fields:
+
+```
+[THENA WEBHOOK SUMMARY]
+  requestId=12345 thena_id=req_abc eventId=evt_xyz
+  status=open subStatus=pending
+  customer=Acme Corp crmID=sf_123 crmName=Acme Corporation
+  channel=slack channelName=support-channel
+  assignedTo: id=u1 name=Mario email=mario@example.com domain=example.com
+  requestor: id=u2 name=John Doe email=john@acme.com domain=acme.com
+  createdAt=2026-01-15T10:00:00Z updatedAt=2026-01-15T11:00:00Z replyCount=5
+  description="Customer is requesting a new feature for..."
+```
+
+**Logged Fields:**
+- IDs: `requestId`, `thena_id`, `eventId`
+- Status: `status`, `subStatus`, `subStatusDetails.name`, `subStatusDetails.description`
+- Customer: `customer_name`, `crm_data.crm_id`, `crm_data.name`
+- Channel: `channelId`, `channelName`, `permalink`, `requestLink`
+- People: `requestor`, `assignedTo`, `assignedBy`, `sender` (with id, name, email, emailDomain)
+- Times: `createdAt`, `updatedAt`, `first_response_at`, `last_reply_by_customer_ts`, `last_reply_by_vendor_ts`
+- Metrics: `replyCount`
+- Description: First 200 characters (truncated, newlines removed)
+
+**Debug Mode:**
+
+To log the full webhook payload (including messages/conversations), set:
+```bash
+export LOG_FULL_PAYLOAD=true
+```
+
+**Note:** The full payload logging is disabled by default to avoid cluttering logs with large message arrays and HTML content.
+
+### Simple Health Check
+```bash
+GET /healthz
+```
+Returns `ok` with 200 status code.
+
 ## Data Mapping
 
 The service maps Thena Request fields to a Card format:
@@ -185,6 +247,7 @@ The service automatically handles rate limit errors and returns appropriate erro
 
 ## Testing
 
+### API Endpoints
 ```bash
 # Test connection
 curl http://localhost:9100/api/test-connection
@@ -197,6 +260,33 @@ curl http://localhost:9100/api/cards-by-status
 
 # Get specific request
 curl http://localhost:9100/api/requests/req_123
+```
+
+### Webhook Endpoint
+```bash
+# Test webhook (no signature verification)
+curl -X POST http://localhost:9100/webhooks/thena \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event": "request.created",
+    "eventId": "evt_test",
+    "data": {
+      "requestId": 12345,
+      "thena_id": "req_abc",
+      "status": "open",
+      "customer_name": "Acme Corp",
+      "description": "Test webhook event"
+    }
+  }'
+
+# Test webhook with API key verification
+curl -X POST http://localhost:9100/webhooks/thena \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: your-webhook-secret" \
+  -d '{"event": "request.updated", "data": {...}}'
+
+# Health check
+curl http://localhost:9100/healthz
 ```
 
 ## Security Notes

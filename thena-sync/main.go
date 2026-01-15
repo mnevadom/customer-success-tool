@@ -421,6 +421,268 @@ func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// Webhook payload structures
+
+// WebhookPayload represents the top-level webhook structure
+type WebhookPayload struct {
+	Event   string                 `json:"event"`
+	EventID string                 `json:"eventId"`
+	Data    map[string]interface{} `json:"data"`
+}
+
+// ThenaWebhookRequest represents the detailed request object from webhook
+type ThenaWebhookRequest struct {
+	RequestID   interface{} `json:"requestId"` // can be int or string
+	ThenaID     string      `json:"thena_id"`
+	EventID     string      `json:"eventId"`
+	Status      string      `json:"status"`
+	SubStatus   string      `json:"subStatus"`
+	Description string      `json:"description"`
+
+	SubStatusDetails struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	} `json:"subStatusDetails"`
+
+	CustomerName string `json:"customer_name"`
+	CRMData      struct {
+		CRMID string `json:"crm_id"`
+		Name  string `json:"name"`
+	} `json:"crm_data"`
+
+	ChannelID   string `json:"channelId"`
+	ChannelName string `json:"channelName"`
+	Permalink   string `json:"permalink"`
+	RequestLink string `json:"requestLink"`
+
+	Requestor struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Email       string `json:"email"`
+		EmailDomain string `json:"emailDomain"`
+	} `json:"requestor"`
+
+	AssignedTo struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Email       string `json:"email"`
+		EmailDomain string `json:"emailDomain"`
+	} `json:"assignedTo"`
+
+	AssignedBy struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Email       string `json:"email"`
+		EmailDomain string `json:"emailDomain"`
+	} `json:"assignedBy"`
+
+	Sender struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Email       string `json:"email"`
+		EmailDomain string `json:"emailDomain"`
+	} `json:"sender"`
+
+	CreatedAt               string `json:"createdAt"`
+	UpdatedAt               string `json:"updatedAt"`
+	FirstResponseAt         string `json:"first_response_at"`
+	LastReplyByCustomerTS   string `json:"last_reply_by_customer_ts"`
+	LastReplyByVendorTS     string `json:"last_reply_by_vendor_ts"`
+	ReplyCount              int    `json:"replyCount"`
+}
+
+// extractRequestObject tries to find the request object from various payload structures
+func extractRequestObject(body []byte) (map[string]interface{}, error) {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("invalid JSON: %v", err)
+	}
+
+	// Check if this is the request object directly (has requestId or thena_id or status)
+	if hasRequestFields(raw) {
+		return raw, nil
+	}
+
+	// Check if data field exists and contains request
+	if data, ok := raw["data"].(map[string]interface{}); ok {
+		if hasRequestFields(data) {
+			return data, nil
+		}
+
+		// Check if data.request exists
+		if request, ok := data["request"].(map[string]interface{}); ok {
+			if hasRequestFields(request) {
+				return request, nil
+			}
+		}
+	}
+
+	// Unknown structure, return raw with indication
+	return raw, fmt.Errorf("unknown payload shape")
+}
+
+// hasRequestFields checks if a map contains typical request fields
+func hasRequestFields(m map[string]interface{}) bool {
+	_, hasRequestID := m["requestId"]
+	_, hasThenaID := m["thena_id"]
+	_, hasStatus := m["status"]
+	return hasRequestID || hasThenaID || hasStatus
+}
+
+// getTopLevelKeys returns the top-level keys of a map
+func getTopLevelKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// truncateString truncates a string to maxLen characters and removes newlines
+func truncateString(s string, maxLen int) string {
+	// Remove newlines and extra whitespace
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.Join(strings.Fields(s), " ") // normalize whitespace
+
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+// logWebhookSummary logs a concise summary of the webhook request
+func logWebhookSummary(requestData map[string]interface{}) {
+	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	log.Println("[THENA WEBHOOK SUMMARY]")
+
+	// Helper to safely get string value
+	getString := func(key string) string {
+		if val, ok := requestData[key]; ok && val != nil {
+			return fmt.Sprintf("%v", val)
+		}
+		return ""
+	}
+
+	// Helper to safely get int value
+	getInt := func(key string) string {
+		if val, ok := requestData[key]; ok && val != nil {
+			switch v := val.(type) {
+			case float64:
+				return fmt.Sprintf("%d", int(v))
+			case int:
+				return fmt.Sprintf("%d", v)
+			default:
+				return fmt.Sprintf("%v", v)
+			}
+		}
+		return ""
+	}
+
+	// Helper to safely get nested object
+	getObject := func(key string) map[string]interface{} {
+		if val, ok := requestData[key].(map[string]interface{}); ok {
+			return val
+		}
+		return nil
+	}
+
+	// IDs
+	log.Printf("  requestId=%s thena_id=%s eventId=%s",
+		getInt("requestId"),
+		getString("thena_id"),
+		getString("eventId"))
+
+	// Status
+	subStatusDetails := getObject("subStatusDetails")
+	subStatusName := ""
+	subStatusDesc := ""
+	if subStatusDetails != nil {
+		if name, ok := subStatusDetails["name"]; ok && name != nil {
+			subStatusName = fmt.Sprintf("%v", name)
+		}
+		if desc, ok := subStatusDetails["description"]; ok && desc != nil {
+			subStatusDesc = fmt.Sprintf("%v", desc)
+		}
+	}
+
+	log.Printf("  status=%s subStatus=%s", getString("status"), getString("subStatus"))
+	if subStatusName != "" {
+		log.Printf("  subStatusName=%s subStatusDesc=%s", subStatusName, subStatusDesc)
+	}
+
+	// Customer / Channel
+	crmData := getObject("crm_data")
+	crmID := ""
+	crmName := ""
+	if crmData != nil {
+		if id, ok := crmData["crm_id"]; ok && id != nil {
+			crmID = fmt.Sprintf("%v", id)
+		}
+		if name, ok := crmData["name"]; ok && name != nil {
+			crmName = fmt.Sprintf("%v", name)
+		}
+	}
+
+	log.Printf("  customer=%s crmID=%s crmName=%s",
+		getString("customer_name"), crmID, crmName)
+	log.Printf("  channel=%s channelName=%s",
+		getString("channelId"), getString("channelName"))
+
+	// Links
+	permalink := getString("permalink")
+	requestLink := getString("requestLink")
+	if permalink != "" || requestLink != "" {
+		log.Printf("  permalink=%s requestLink=%s", permalink, requestLink)
+	}
+
+	// People
+	requestor := getObject("requestor")
+	if requestor != nil {
+		log.Printf("  requestor: id=%v name=%v email=%v domain=%v",
+			requestor["id"], requestor["name"], requestor["email"], requestor["emailDomain"])
+	}
+
+	assignedTo := getObject("assignedTo")
+	if assignedTo != nil {
+		log.Printf("  assignedTo: id=%v name=%v email=%v domain=%v",
+			assignedTo["id"], assignedTo["name"], assignedTo["email"], assignedTo["emailDomain"])
+	}
+
+	assignedBy := getObject("assignedBy")
+	if assignedBy != nil {
+		log.Printf("  assignedBy: id=%v name=%v email=%v domain=%v",
+			assignedBy["id"], assignedBy["name"], assignedBy["email"], assignedBy["emailDomain"])
+	}
+
+	sender := getObject("sender")
+	if sender != nil {
+		log.Printf("  sender: id=%v name=%v email=%v domain=%v",
+			sender["id"], sender["name"], sender["email"], sender["emailDomain"])
+	}
+
+	// Times / Metrics
+	log.Printf("  createdAt=%s updatedAt=%s replyCount=%s",
+		getString("createdAt"), getString("updatedAt"), getInt("replyCount"))
+
+	firstResponse := getString("first_response_at")
+	lastCustomer := getString("last_reply_by_customer_ts")
+	lastVendor := getString("last_reply_by_vendor_ts")
+	if firstResponse != "" || lastCustomer != "" || lastVendor != "" {
+		log.Printf("  firstResponseAt=%s lastCustomer=%s lastVendor=%s",
+			firstResponse, lastCustomer, lastVendor)
+	}
+
+	// Description (truncated)
+	description := getString("description")
+	if description != "" {
+		truncated := truncateString(description, 200)
+		log.Printf("  description=\"%s\"", truncated)
+	}
+
+	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+}
+
 // Webhook handlers
 
 // verifyWebhookSignature validates the webhook request
@@ -470,32 +732,6 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	// Log request details
-	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	log.Printf("📥 Webhook received: %s %s", r.Method, r.URL.Path)
-	log.Printf("🌐 Remote Address: %s", r.RemoteAddr)
-	log.Println("📋 Headers:")
-
-	// Log important headers
-	headers := []string{"Content-Type", "User-Agent", "X-Api-Key", "X-Thena-Signature"}
-	for _, h := range headers {
-		if val := r.Header.Get(h); val != "" {
-			// Mask sensitive headers in logs
-			if strings.ToLower(h) == "x-api-key" && len(val) > 8 {
-				log.Printf("  %s: %s...%s", h, val[:4], val[len(val)-4:])
-			} else {
-				log.Printf("  %s: %s", h, val)
-			}
-		}
-	}
-
-	// Log any x-* headers
-	for name, values := range r.Header {
-		if strings.HasPrefix(strings.ToLower(name), "x-") && !strings.Contains(strings.ToLower(name), "key") {
-			log.Printf("  %s: %s", name, strings.Join(values, ", "))
-		}
-	}
-
 	// Verify webhook signature if secret is set
 	webhookSecret := os.Getenv("THENA_WEBHOOK_SECRET")
 	apiKey := r.Header.Get("X-Api-Key")
@@ -508,20 +744,36 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Log body
-	log.Println("📦 Body:")
-
-	// Try to pretty-print if it's valid JSON
-	var jsonData interface{}
-	if err := json.Unmarshal(body, &jsonData); err == nil {
-		prettyJSON, _ := json.MarshalIndent(jsonData, "", "  ")
-		log.Println(string(prettyJSON))
+	// Extract request object from payload
+	requestData, err := extractRequestObject(body)
+	if err != nil {
+		if err.Error() == "unknown payload shape" {
+			// Log unknown payload structure
+			log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+			log.Printf("📥 Webhook received: %s %s", r.Method, r.URL.Path)
+			log.Printf("⚠️  Unknown payload shape. Top-level keys: %v", getTopLevelKeys(requestData))
+			log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		} else {
+			log.Printf("❌ Failed to parse webhook payload: %v", err)
+		}
 	} else {
-		// Not JSON or invalid, just log as string
-		log.Printf("  (Raw) %s", string(body))
+		// Log concise summary
+		logWebhookSummary(requestData)
 	}
 
-	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	// Optionally log full payload if LOG_FULL_PAYLOAD is set
+	if os.Getenv("LOG_FULL_PAYLOAD") == "true" {
+		log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		log.Println("[FULL PAYLOAD DEBUG]")
+		var jsonData interface{}
+		if err := json.Unmarshal(body, &jsonData); err == nil {
+			prettyJSON, _ := json.MarshalIndent(jsonData, "", "  ")
+			log.Println(string(prettyJSON))
+		} else {
+			log.Printf("(Raw) %s", string(body))
+		}
+		log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	}
 
 	// Respond 200 OK
 	w.WriteHeader(http.StatusOK)
