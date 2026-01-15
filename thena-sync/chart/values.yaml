@@ -25,6 +25,8 @@ env:
     value: ""
   - name: THENA_BASE_URL
     value: "https://bolt.thena.ai"
+  - name: THENA_WEBHOOK_SECRET
+    value: ""
 
 resources:
   limits:

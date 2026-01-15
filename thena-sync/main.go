@@ -801,10 +801,7 @@ func logWebhookSummary(requestData map[string]interface{}, fullPayload map[strin
 
 // verifyWebhookSignature validates the webhook request
 func verifyWebhookSignature(body []byte, apiKey string, signature string, webhookSecret string) bool {
-	if webhookSecret == "" {
-		log.Println("⚠️  THENA_WEBHOOK_SECRET not set, skipping verification")
-		return true
-	}
+	// Note: webhookSecret is always set, service won't start without it
 
 	// Option A: Check x-api-key header
 	if apiKey != "" && apiKey == webhookSecret {
@@ -824,6 +821,7 @@ func verifyWebhookSignature(body []byte, apiKey string, signature string, webhoo
 		}
 	}
 
+	log.Println("❌ Webhook verification failed: neither x-api-key nor x-thena-signature matched")
 	return false
 }
 
@@ -1006,7 +1004,7 @@ func forwardToBackend(requestData map[string]interface{}, fullPayload map[string
 		return
 	}
 
-	resp, err := http.Post(backendURL+"/api/thena-webhook", "application/json", strings.NewReader(string(jsonData)))
+	resp, err := http.Post(backendURL+"/internal/thena/events", "application/json", strings.NewReader(string(jsonData)))
 	if err != nil {
 		log.Printf("❌ Failed to forward to backend: %v", err)
 		return
@@ -1051,15 +1049,28 @@ func main() {
 	port := getEnvOrDefault("PORT", "9100")
 	webhookSecret := os.Getenv("THENA_WEBHOOK_SECRET")
 
+	// CRITICAL: THENA_WEBHOOK_SECRET is required for security
+	if webhookSecret == "" {
+		log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		log.Println("❌ ERROR: THENA_WEBHOOK_SECRET is not set!")
+		log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		log.Println("")
+		log.Println("For security reasons, the service will not start without a webhook secret.")
+		log.Println("This prevents unauthorized webhooks from being processed.")
+		log.Println("")
+		log.Println("To fix this:")
+		log.Println("  1. Set THENA_WEBHOOK_SECRET in your environment")
+		log.Println("  2. Use the same secret value configured in Thena webhook settings")
+		log.Println("  3. Restart the service")
+		log.Println("")
+		log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		log.Fatal("Service cannot start without THENA_WEBHOOK_SECRET")
+	}
+
 	log.Printf("Starting Thena Sync service on port %s", port)
 	log.Printf("Base URL: %s", thenaClient.BaseURL)
 	log.Printf("Webhook endpoint: /webhooks/thena")
-
-	if webhookSecret == "" {
-		log.Println("⚠️  THENA_WEBHOOK_SECRET not set - webhooks will accept all requests without verification")
-	} else {
-		log.Println("✅ THENA_WEBHOOK_SECRET configured - webhook signature verification enabled")
-	}
+	log.Println("✅ THENA_WEBHOOK_SECRET configured - webhook signature verification enabled")
 
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatalf("Failed to start server: %v", err)

@@ -809,8 +809,33 @@ func main() {
 		})
 	})
 
-	// Thena webhook endpoint
-	mux.HandleFunc("/api/thena-webhook", thenaWebhookHandler)
+	// Internal endpoint for thena-sync to forward events
+	mux.HandleFunc("/internal/thena/events", thenaWebhookHandler)
+
+	// Public REST API endpoint for frontend
+	mux.HandleFunc("/api/requests", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		thenaRequestsMutex.Lock()
+		defer thenaRequestsMutex.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+
+		// Return in reverse order (newest first)
+		result := make([]ThenaRequest, len(thenaRequests))
+		for i, req := range thenaRequests {
+			result[len(thenaRequests)-1-i] = req
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"count":   len(result),
+			"requests": result,
+		})
+	})
 
 	// Root endpoint
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

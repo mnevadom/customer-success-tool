@@ -58,6 +58,8 @@ deploy:
         --set env[1].value="${THENA_API_KEY:-}" \
         --set env[2].name="THENA_BASE_URL" \
         --set env[2].value="${THENA_BASE_URL:-https://bolt.thena.ai}" \
+        --set env[3].name="THENA_WEBHOOK_SECRET" \
+        --set env[3].value="${THENA_WEBHOOK_SECRET}" \
         --wait
 
 dev:
