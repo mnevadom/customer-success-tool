@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -50,6 +51,37 @@ type Dashboard struct {
 	ID      string   `json:"id"`
 	Name    string   `json:"name"`
 	Widgets []Widget `json:"widgets"`
+}
+
+// ThenaRequest represents a Thena webhook request
+type ThenaRequest struct {
+	ID              string    `json:"id"`
+	RequestID       int       `json:"requestId"`
+	ThenaID         string    `json:"thenaId"`
+	EventID         string    `json:"eventId"`
+	Status          string    `json:"status"`
+	SubStatus       string    `json:"subStatus"`
+	SubStatusName   string    `json:"subStatusName"`
+	SubStatusDesc   string    `json:"subStatusDesc"`
+	CustomerName    string    `json:"customerName"`
+	CRMID           string    `json:"crmId"`
+	CRMName         string    `json:"crmName"`
+	ChannelID       string    `json:"channelId"`
+	ChannelName     string    `json:"channelName"`
+	Permalink       string    `json:"permalink"`
+	RequestLink     string    `json:"requestLink"`
+	ThenaURL        string    `json:"thenaUrl"`
+	AssignedToID    string    `json:"assignedToId"`
+	AssignedToName  string    `json:"assignedToName"`
+	AssignedToEmail string    `json:"assignedToEmail"`
+	RequestorID     string    `json:"requestorId"`
+	RequestorName   string    `json:"requestorName"`
+	RequestorEmail  string    `json:"requestorEmail"`
+	CreatedAt       string    `json:"createdAt"`
+	UpdatedAt       string    `json:"updatedAt"`
+	ReplyCount      int       `json:"replyCount"`
+	Description     string    `json:"description"`
+	ReceivedAt      time.Time `json:"receivedAt"`
 }
 
 // Mock data store
@@ -252,6 +284,12 @@ var mockClients = []Client{
 	},
 }
 
+// In-memory store for Thena requests (with mutex for thread safety)
+var (
+	thenaRequests      = []ThenaRequest{}
+	thenaRequestsMutex = &sync.Mutex{}
+)
+
 var mockDashboards = []Dashboard{
 	{
 		ID:   "dashboard-1",
@@ -343,6 +381,101 @@ func findDashboardByID(id string) *Dashboard {
 		}
 	}
 	return nil
+}
+
+// Handler for receiving webhook data from thena-sync
+func thenaWebhookHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		log.Printf("Error decoding webhook payload: %v", err)
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Extract fields from payload
+	thenaReq := ThenaRequest{
+		ID:         fmt.Sprintf("thena-%d", time.Now().UnixNano()),
+		ReceivedAt: time.Now(),
+	}
+
+	// Helper to safely extract string
+	getString := func(key string) string {
+		if val, ok := payload[key]; ok && val != nil {
+			return fmt.Sprintf("%v", val)
+		}
+		return ""
+	}
+
+	// Helper to safely extract int
+	getInt := func(key string) int {
+		if val, ok := payload[key]; ok && val != nil {
+			switch v := val.(type) {
+			case float64:
+				return int(v)
+			case int:
+				return v
+			}
+		}
+		return 0
+	}
+
+	// Helper to extract nested object string
+	getNestedString := func(obj map[string]interface{}, key string) string {
+		if val, ok := obj[key]; ok && val != nil {
+			return fmt.Sprintf("%v", val)
+		}
+		return ""
+	}
+
+	thenaReq.RequestID = getInt("requestId")
+	thenaReq.ThenaID = getString("thenaId")
+	thenaReq.EventID = getString("eventId")
+	thenaReq.Status = getString("status")
+	thenaReq.SubStatus = getString("subStatus")
+	thenaReq.SubStatusName = getString("subStatusName")
+	thenaReq.SubStatusDesc = getString("subStatusDesc")
+	thenaReq.CustomerName = getString("customerName")
+	thenaReq.CRMID = getString("crmId")
+	thenaReq.CRMName = getString("crmName")
+	thenaReq.ChannelID = getString("channelId")
+	thenaReq.ChannelName = getString("channelName")
+	thenaReq.Permalink = getString("permalink")
+	thenaReq.RequestLink = getString("requestLink")
+	thenaReq.ThenaURL = getString("thenaUrl")
+	thenaReq.CreatedAt = getString("createdAt")
+	thenaReq.UpdatedAt = getString("updatedAt")
+	thenaReq.ReplyCount = getInt("replyCount")
+	thenaReq.Description = getString("description")
+
+	// Extract assignedTo
+	if assignedTo, ok := payload["assignedTo"].(map[string]interface{}); ok {
+		thenaReq.AssignedToID = getNestedString(assignedTo, "id")
+		thenaReq.AssignedToName = getNestedString(assignedTo, "name")
+		thenaReq.AssignedToEmail = getNestedString(assignedTo, "email")
+	}
+
+	// Extract requestor
+	if requestor, ok := payload["requestor"].(map[string]interface{}); ok {
+		thenaReq.RequestorID = getNestedString(requestor, "id")
+		thenaReq.RequestorName = getNestedString(requestor, "name")
+		thenaReq.RequestorEmail = getNestedString(requestor, "email")
+	}
+
+	// Store the request
+	thenaRequestsMutex.Lock()
+	thenaRequests = append(thenaRequests, thenaReq)
+	thenaRequestsMutex.Unlock()
+
+	log.Printf("✅ Stored Thena request: requestId=%d customer=%s status=%s",
+		thenaReq.RequestID, thenaReq.CustomerName, thenaReq.Status)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func main() {
@@ -460,6 +593,99 @@ func main() {
 		},
 	})
 
+	thenaRequestType := graphql.NewObject(graphql.ObjectConfig{
+		Name: "ThenaRequest",
+		Fields: graphql.Fields{
+			"id": &graphql.Field{
+				Type: graphql.String,
+			},
+			"requestId": &graphql.Field{
+				Type: graphql.Int,
+			},
+			"thenaId": &graphql.Field{
+				Type: graphql.String,
+			},
+			"eventId": &graphql.Field{
+				Type: graphql.String,
+			},
+			"status": &graphql.Field{
+				Type: graphql.String,
+			},
+			"subStatus": &graphql.Field{
+				Type: graphql.String,
+			},
+			"subStatusName": &graphql.Field{
+				Type: graphql.String,
+			},
+			"subStatusDesc": &graphql.Field{
+				Type: graphql.String,
+			},
+			"customerName": &graphql.Field{
+				Type: graphql.String,
+			},
+			"crmId": &graphql.Field{
+				Type: graphql.String,
+			},
+			"crmName": &graphql.Field{
+				Type: graphql.String,
+			},
+			"channelId": &graphql.Field{
+				Type: graphql.String,
+			},
+			"channelName": &graphql.Field{
+				Type: graphql.String,
+			},
+			"permalink": &graphql.Field{
+				Type: graphql.String,
+			},
+			"requestLink": &graphql.Field{
+				Type: graphql.String,
+			},
+			"thenaUrl": &graphql.Field{
+				Type: graphql.String,
+			},
+			"assignedToId": &graphql.Field{
+				Type: graphql.String,
+			},
+			"assignedToName": &graphql.Field{
+				Type: graphql.String,
+			},
+			"assignedToEmail": &graphql.Field{
+				Type: graphql.String,
+			},
+			"requestorId": &graphql.Field{
+				Type: graphql.String,
+			},
+			"requestorName": &graphql.Field{
+				Type: graphql.String,
+			},
+			"requestorEmail": &graphql.Field{
+				Type: graphql.String,
+			},
+			"createdAt": &graphql.Field{
+				Type: graphql.String,
+			},
+			"updatedAt": &graphql.Field{
+				Type: graphql.String,
+			},
+			"replyCount": &graphql.Field{
+				Type: graphql.Int,
+			},
+			"description": &graphql.Field{
+				Type: graphql.String,
+			},
+			"receivedAt": &graphql.Field{
+				Type: graphql.String,
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					if req, ok := p.Source.(ThenaRequest); ok {
+						return req.ReceivedAt.Format(time.RFC3339), nil
+					}
+					return nil, nil
+				},
+			},
+		},
+	})
+
 	// Define root query
 	rootQuery := graphql.NewObject(graphql.ObjectConfig{
 		Name: "Query",
@@ -522,6 +748,21 @@ func main() {
 					return dashboard, nil
 				},
 			},
+			"thenaRequests": &graphql.Field{
+				Type:        graphql.NewList(thenaRequestType),
+				Description: "Get list of all Thena webhook requests",
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					thenaRequestsMutex.Lock()
+					defer thenaRequestsMutex.Unlock()
+					log.Printf("Query: thenaRequests - returning %d requests", len(thenaRequests))
+					// Return in reverse order (newest first)
+					result := make([]ThenaRequest, len(thenaRequests))
+					for i, req := range thenaRequests {
+						result[len(thenaRequests)-1-i] = req
+					}
+					return result, nil
+				},
+			},
 		},
 	})
 
@@ -562,6 +803,9 @@ func main() {
 			"time":   time.Now().Format(time.RFC3339),
 		})
 	})
+
+	// Thena webhook endpoint
+	mux.HandleFunc("/api/thena-webhook", thenaWebhookHandler)
 
 	// Root endpoint
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

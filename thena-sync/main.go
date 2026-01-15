@@ -883,6 +883,13 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Log concise summary
 		logWebhookSummary(requestData, fullPayload)
+
+		// Forward to backend only if customer_name exists (filter out test webhooks)
+		if customerName, ok := requestData["customer_name"]; ok && customerName != nil && customerName != "" {
+			go forwardToBackend(requestData, fullPayload)
+		} else {
+			log.Println("ℹ️  Skipping backend forward (no customer_name)")
+		}
 	}
 
 	// Optionally log full payload if LOG_FULL_PAYLOAD is set
@@ -902,6 +909,117 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 	// Respond 200 OK
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
+}
+
+// forwardToBackend sends the webhook data to the backend API
+func forwardToBackend(requestData map[string]interface{}, fullPayload map[string]interface{}) {
+	backendURL := os.Getenv("BACKEND_URL")
+	if backendURL == "" {
+		backendURL = "http://backend:8080"
+	}
+
+	// Prepare payload for backend
+	payload := make(map[string]interface{})
+
+	// Helper to safely get string value
+	getString := func(m map[string]interface{}, key string) string {
+		if val, ok := m[key]; ok && val != nil {
+			return fmt.Sprintf("%v", val)
+		}
+		return ""
+	}
+
+	// Helper to safely get int value
+	getInt := func(m map[string]interface{}, key string) int {
+		if val, ok := m[key]; ok && val != nil {
+			switch v := val.(type) {
+			case float64:
+				return int(v)
+			case int:
+				return v
+			}
+		}
+		return 0
+	}
+
+	// Helper to safely get nested object
+	getObject := func(m map[string]interface{}, key string) map[string]interface{} {
+		if val, ok := m[key].(map[string]interface{}); ok {
+			return val
+		}
+		return nil
+	}
+
+	// Extract all fields
+	payload["requestId"] = getInt(requestData, "requestId")
+	payload["thenaId"] = getString(requestData, "thena_id")
+	payload["eventId"] = extractEventID(requestData, fullPayload)
+	payload["status"] = getString(requestData, "status")
+	payload["subStatus"] = getString(requestData, "subStatus")
+
+	// SubStatusDetails
+	if subStatusDetails := getObject(requestData, "subStatusDetails"); subStatusDetails != nil {
+		payload["subStatusName"] = getString(subStatusDetails, "name")
+		payload["subStatusDesc"] = getString(subStatusDetails, "description")
+	}
+
+	payload["customerName"] = getString(requestData, "customer_name")
+
+	// CRM Data
+	if crmData := getObject(requestData, "crm_data"); crmData != nil {
+		payload["crmId"] = getString(crmData, "crm_id")
+		payload["crmName"] = getString(crmData, "name")
+	}
+
+	payload["channelId"] = getString(requestData, "channelId")
+	payload["channelName"] = getString(requestData, "channelName")
+	payload["permalink"] = getString(requestData, "permalink")
+	payload["requestLink"] = getString(requestData, "requestLink")
+	payload["thenaUrl"] = computeThenaUrl(requestData)
+	payload["createdAt"] = getString(requestData, "createdAt")
+	payload["updatedAt"] = getString(requestData, "updatedAt")
+	payload["replyCount"] = getInt(requestData, "replyCount")
+	payload["description"] = getString(requestData, "description")
+
+	// AssignedTo
+	if assignedTo := getObject(requestData, "assignedTo"); assignedTo != nil {
+		payload["assignedTo"] = map[string]string{
+			"id":    getString(assignedTo, "id"),
+			"name":  getString(assignedTo, "name"),
+			"email": getString(assignedTo, "email"),
+		}
+	}
+
+	// Requestor
+	if requestor := getObject(requestData, "requestor"); requestor != nil {
+		payload["requestor"] = map[string]string{
+			"id":    getString(requestor, "id"),
+			"name":  getString(requestor, "name"),
+			"email": getString(requestor, "email"),
+		}
+	}
+
+	// Send to backend
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("❌ Failed to marshal backend payload: %v", err)
+		return
+	}
+
+	resp, err := http.Post(backendURL+"/api/thena-webhook", "application/json", strings.NewReader(string(jsonData)))
+	if err != nil {
+		log.Printf("❌ Failed to forward to backend: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		log.Printf("✅ Forwarded to backend: requestId=%d customer=%s",
+			payload["requestId"], payload["customerName"])
+	} else {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("⚠️  Backend returned status %d: %s", resp.StatusCode, string(body))
+	}
 }
 
 // healthzHandler handles GET /healthz
