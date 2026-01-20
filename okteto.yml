@@ -35,11 +35,12 @@ deploy:
     command: |
       # Create or update the Kubernetes secret with the private key
       if [ -n "$SALESFORCE_PRIVATE_KEY" ]; then
-        echo "Creating salesforce-jwt-key secret from SALESFORCE_PRIVATE_KEY admin variable..."
+        echo "Creating salesforce-jwt-key secret in namespace ${OKTETO_NAMESPACE}..."
         kubectl create secret generic salesforce-jwt-key \
           --from-literal=private_key.pem="$SALESFORCE_PRIVATE_KEY" \
+          --namespace=${OKTETO_NAMESPACE} \
           --dry-run=client -o yaml | kubectl apply -f -
-        echo "✅ Secret salesforce-jwt-key created/updated"
+        echo "✅ Secret salesforce-jwt-key created/updated in ${OKTETO_NAMESPACE}"
       else
         echo "⚠️  SALESFORCE_PRIVATE_KEY admin variable not set - service will fail to start"
         echo "   To fix: Set SALESFORCE_PRIVATE_KEY in Okteto admin variables with the private key content"
