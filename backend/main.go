@@ -593,9 +593,14 @@ func thenaWebhookHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Convert to database model and save
 	dbReq := convertToDBRequest(thenaReq, payload)
+	log.Printf("📥 Attempting to save Thena request: thena_id=%s request_id=%d customer=%s",
+		dbReq.ThenaID, dbReq.RequestID, dbReq.CustomerName)
+
 	if err := db.UpsertThenaRequest(dbReq); err != nil {
 		log.Printf("❌ Failed to save Thena request to database: %v", err)
-		http.Error(w, "Failed to save request", http.StatusInternalServerError)
+		log.Printf("   Request details - thena_id: %s, request_id: %d, status: %s, sub_status: %s",
+			dbReq.ThenaID, dbReq.RequestID, dbReq.Status, dbReq.SubStatus.String)
+		http.Error(w, fmt.Sprintf("Failed to save request: %v", err), http.StatusInternalServerError)
 		return
 	}
 

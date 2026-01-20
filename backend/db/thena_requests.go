@@ -52,6 +52,16 @@ type ThenaRequestDB struct {
 
 // UpsertThenaRequest inserts or updates a Thena request and tracks status history
 func UpsertThenaRequest(req ThenaRequestDB) error {
+	// Validate database connection
+	if DB == nil {
+		return fmt.Errorf("database connection is nil - InitDB may not have been called")
+	}
+
+	// Test database connection
+	if err := DB.Ping(); err != nil {
+		return fmt.Errorf("database connection lost: %w", err)
+	}
+
 	// Start a transaction
 	tx, err := DB.Begin()
 	if err != nil {
