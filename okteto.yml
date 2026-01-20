@@ -31,6 +31,20 @@ deploy:
         --set env[0].value="https://backend-${OKTETO_NAMESPACE}.${OKTETO_DOMAIN}" \
         --wait
 
+  - name: Create Salesforce JWT secret
+    command: |
+      # Create or update the Kubernetes secret with the private key
+      if [ -n "$SALESFORCE_PRIVATE_KEY" ]; then
+        echo "Creating salesforce-jwt-key secret from SALESFORCE_PRIVATE_KEY admin variable..."
+        kubectl create secret generic salesforce-jwt-key \
+          --from-literal=private_key.pem="$SALESFORCE_PRIVATE_KEY" \
+          --dry-run=client -o yaml | kubectl apply -f -
+        echo "✅ Secret salesforce-jwt-key created/updated"
+      else
+        echo "⚠️  SALESFORCE_PRIVATE_KEY admin variable not set - service will fail to start"
+        echo "   To fix: Set SALESFORCE_PRIVATE_KEY in Okteto admin variables with the private key content"
+      fi
+
   - name: Deploy salesforce-sync with Helm
     command: |
       helm upgrade --install salesforce-sync ./salesforce-sync/chart \

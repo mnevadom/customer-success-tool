@@ -43,65 +43,30 @@ IT needs to:
 
 ### 3. Deploy Credentials to Okteto
 
-#### Method A: Using Kubernetes Secrets (Recommended)
+✅ **The deployment is now fully automated!** Just set the admin variables in Okteto.
 
-```bash
-# 1. Create secret for private key
-kubectl create secret generic salesforce-jwt-key \
-  --from-file=private_key.pem=./private_key.pem \
-  -n agent-87kkzgw4nmq4
+#### Set Okteto Admin Variables
 
-# 2. Update Helm deployment to use secret
-# Edit okteto.yml or use Helm values to set:
-#   - SALESFORCE_CLIENT_ID=<Consumer Key from Connected App>
-#   - SALESFORCE_USERNAME=<service user email>
-#   - SALESFORCE_AUD=https://login.salesforce.com  (or https://test.salesforce.com for sandbox)
-#   - SALESFORCE_PRIVATE_KEY_PATH=/secrets/private_key.pem
-#
-# And mount the secret as a volume at /secrets
-```
+In the Okteto UI, go to **Settings → Admin Variables** and set:
 
-#### Method B: Using Environment Variable (Less secure, for testing only)
+| Variable Name | Value | Required |
+|---------------|-------|----------|
+| `SALESFORCE_PRIVATE_KEY` | Full content of `private_key.pem` | ✅ Required |
+| `SALESFORCE_CLIENT_ID` | Consumer Key from Connected App | ✅ Required |
+| `SALESFORCE_USERNAME` | Service user email | ✅ Required |
+| `SALESFORCE_AUD` | `https://login.salesforce.com` or `https://test.salesforce.com` | ✅ Required |
+| `SALESFORCE_API_VERSION` | `v58.0` | ⚪ Optional (has default) |
 
-```bash
-# Set environment variables directly (not recommended for production):
-# - SALESFORCE_CLIENT_ID
-# - SALESFORCE_USERNAME
-# - SALESFORCE_AUD
-# - SALESFORCE_PRIVATE_KEY (entire PEM content)
-```
+**For `SALESFORCE_PRIVATE_KEY`**: Copy the entire content of the `private_key.pem` file, including the `-----BEGIN RSA PRIVATE KEY-----` and `-----END RSA PRIVATE KEY-----` lines.
 
-### 4. Update okteto.yml
+#### How It Works
 
-Current salesforce-sync deployment in `okteto.yml` uses old OAuth variables. Update to:
+The `okteto.yml` deployment automatically:
+1. Creates a Kubernetes secret `salesforce-jwt-key` from the `SALESFORCE_PRIVATE_KEY` admin variable
+2. Mounts the secret at `/secrets/private_key.pem` in the pod
+3. Passes all environment variables to the service
 
-```yaml
-- name: Deploy salesforce-sync with Helm
-  command: |
-    helm upgrade --install salesforce-sync ./salesforce-sync/chart \
-      --set image.repository=${OKTETO_BUILD_SALESFORCE_SYNC_IMAGE%:*} \
-      --set image.tag=${OKTETO_BUILD_SALESFORCE_SYNC_IMAGE##*:} \
-      --set env[0].name="PORT" \
-      --set env[0].value="9000" \
-      --set env[1].name="SALESFORCE_CLIENT_ID" \
-      --set env[1].value="${SALESFORCE_CLIENT_ID:-}" \
-      --set env[2].name="SALESFORCE_USERNAME" \
-      --set env[2].value="${SALESFORCE_USERNAME:-}" \
-      --set env[3].name="SALESFORCE_AUD" \
-      --set env[3].value="${SALESFORCE_AUD:-https://login.salesforce.com}" \
-      --set env[4].name="SALESFORCE_PRIVATE_KEY_PATH" \
-      --set env[4].value="/secrets/private_key.pem" \
-      --set env[5].name="SALESFORCE_API_VERSION" \
-      --set env[5].value="${SALESFORCE_API_VERSION:-v58.0}" \
-      --set volumes[0].name="salesforce-key" \
-      --set volumes[0].secret.secretName="salesforce-jwt-key" \
-      --set volumeMounts[0].name="salesforce-key" \
-      --set volumeMounts[0].mountPath="/secrets" \
-      --set volumeMounts[0].readOnly="true" \
-      --wait
-```
-
-Or update the Helm chart directly in `salesforce-sync/chart/values.yaml` and `templates/deployment.yaml`.
+No manual `kubectl` commands needed! Just set the admin variables and deploy.
 
 ## Testing the Integration
 
