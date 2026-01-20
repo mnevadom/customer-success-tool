@@ -381,6 +381,14 @@ BEGIN
                    WHERE table_name = 'thena_status_history' AND column_name = 'to_sub_status_name') THEN
         ALTER TABLE thena_status_history ADD COLUMN to_sub_status_name VARCHAR(255);
     END IF;
+
+    -- Add UNIQUE constraint for ON CONFLICT in insertStatusHistory
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conname = 'thena_status_history_event_status_key') THEN
+        ALTER TABLE thena_status_history
+        ADD CONSTRAINT thena_status_history_event_status_key
+        UNIQUE (event_id, to_status, to_sub_status);
+    END IF;
 END $$;
 
 -- Create indexes if they don't exist
