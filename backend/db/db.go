@@ -77,6 +77,11 @@ func runMigrations() error {
 		return err
 	}
 
+	// Migration 003: Fix Thena schema columns
+	if err := applyMigration("003", "Fix Thena requests schema for existing databases", migration003); err != nil {
+		return err
+	}
+
 	log.Println("✅ All migrations applied successfully")
 	return nil
 }
@@ -212,6 +217,176 @@ CREATE INDEX IF NOT EXISTS idx_feature_requests_customer ON feature_requests(cus
 CREATE INDEX IF NOT EXISTS idx_feature_requests_status ON feature_requests(status);
 CREATE INDEX IF NOT EXISTS idx_feature_requests_jira_key ON feature_requests(jira_key);
 CREATE INDEX IF NOT EXISTS idx_feature_requests_created_at ON feature_requests(created_at);
+`
+
+const migration003 = `
+-- Migration: 003_fix_thena_schema.sql
+-- Description: Fix Thena requests schema for databases created with old schema
+
+-- Add missing columns if they don't exist
+DO $$
+BEGIN
+    -- Rename sub_status_desc to sub_status_description if it exists
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_name = 'thena_requests' AND column_name = 'sub_status_desc') THEN
+        ALTER TABLE thena_requests RENAME COLUMN sub_status_desc TO sub_status_description;
+    END IF;
+
+    -- Add sub_status_description if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_requests' AND column_name = 'sub_status_description') THEN
+        ALTER TABLE thena_requests ADD COLUMN sub_status_description TEXT;
+    END IF;
+
+    -- Add missing CRM columns
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_requests' AND column_name = 'crm_account_id') THEN
+        ALTER TABLE thena_requests ADD COLUMN crm_account_id VARCHAR(255);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_requests' AND column_name = 'crm_account_name') THEN
+        ALTER TABLE thena_requests ADD COLUMN crm_account_name VARCHAR(255);
+    END IF;
+
+    -- Add domain columns if they don't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_requests' AND column_name = 'requestor_domain') THEN
+        ALTER TABLE thena_requests ADD COLUMN requestor_domain VARCHAR(255);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_requests' AND column_name = 'assigned_to_domain') THEN
+        ALTER TABLE thena_requests ADD COLUMN assigned_to_domain VARCHAR(255);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_requests' AND column_name = 'assigned_by_id') THEN
+        ALTER TABLE thena_requests ADD COLUMN assigned_by_id VARCHAR(255);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_requests' AND column_name = 'assigned_by_name') THEN
+        ALTER TABLE thena_requests ADD COLUMN assigned_by_name VARCHAR(255);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_requests' AND column_name = 'assigned_by_email') THEN
+        ALTER TABLE thena_requests ADD COLUMN assigned_by_email VARCHAR(255);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_requests' AND column_name = 'assigned_by_domain') THEN
+        ALTER TABLE thena_requests ADD COLUMN assigned_by_domain VARCHAR(255);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_requests' AND column_name = 'sender_id') THEN
+        ALTER TABLE thena_requests ADD COLUMN sender_id VARCHAR(255);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_requests' AND column_name = 'sender_name') THEN
+        ALTER TABLE thena_requests ADD COLUMN sender_name VARCHAR(255);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_requests' AND column_name = 'sender_email') THEN
+        ALTER TABLE thena_requests ADD COLUMN sender_email VARCHAR(255);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_requests' AND column_name = 'sender_domain') THEN
+        ALTER TABLE thena_requests ADD COLUMN sender_domain VARCHAR(255);
+    END IF;
+
+    -- Add timestamp columns
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_requests' AND column_name = 'first_response_at') THEN
+        ALTER TABLE thena_requests ADD COLUMN first_response_at TIMESTAMP WITH TIME ZONE;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_requests' AND column_name = 'last_customer_message_at') THEN
+        ALTER TABLE thena_requests ADD COLUMN last_customer_message_at TIMESTAMP WITH TIME ZONE;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_requests' AND column_name = 'last_vendor_message_at') THEN
+        ALTER TABLE thena_requests ADD COLUMN last_vendor_message_at TIMESTAMP WITH TIME ZONE;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_requests' AND column_name = 'updated_at_db') THEN
+        ALTER TABLE thena_requests ADD COLUMN updated_at_db TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+    END IF;
+
+    -- Ensure thena_id is unique (might already be from old schema)
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'thena_requests_thena_id_key') THEN
+        ALTER TABLE thena_requests ADD CONSTRAINT thena_requests_thena_id_key UNIQUE (thena_id);
+    END IF;
+
+    -- Fix thena_status_history table if needed
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_status_history' AND column_name = 'from_status') THEN
+        -- Rename old_status to from_status
+        IF EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_status_history' AND column_name = 'old_status') THEN
+            ALTER TABLE thena_status_history RENAME COLUMN old_status TO from_status;
+        END IF;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_status_history' AND column_name = 'to_status') THEN
+        -- Rename new_status to to_status
+        IF EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_status_history' AND column_name = 'new_status') THEN
+            ALTER TABLE thena_status_history RENAME COLUMN new_status TO to_status;
+        END IF;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_status_history' AND column_name = 'from_sub_status') THEN
+        IF EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_status_history' AND column_name = 'old_sub_status') THEN
+            ALTER TABLE thena_status_history RENAME COLUMN old_sub_status TO from_sub_status;
+        END IF;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_status_history' AND column_name = 'to_sub_status') THEN
+        IF EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_status_history' AND column_name = 'new_sub_status') THEN
+            ALTER TABLE thena_status_history RENAME COLUMN new_sub_status TO to_sub_status;
+        END IF;
+    END IF;
+
+    -- Add missing columns to thena_status_history
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_status_history' AND column_name = 'thena_id') THEN
+        ALTER TABLE thena_status_history ADD COLUMN thena_id VARCHAR(255);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_status_history' AND column_name = 'event_id') THEN
+        ALTER TABLE thena_status_history ADD COLUMN event_id VARCHAR(255);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_status_history' AND column_name = 'from_sub_status_name') THEN
+        ALTER TABLE thena_status_history ADD COLUMN from_sub_status_name VARCHAR(255);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'thena_status_history' AND column_name = 'to_sub_status_name') THEN
+        ALTER TABLE thena_status_history ADD COLUMN to_sub_status_name VARCHAR(255);
+    END IF;
+END $$;
+
+-- Create indexes if they don't exist
+CREATE INDEX IF NOT EXISTS idx_thena_requests_thena_id ON thena_requests(thena_id);
+CREATE INDEX IF NOT EXISTS idx_thena_requests_updated_at ON thena_requests(updated_at);
+CREATE INDEX IF NOT EXISTS idx_thena_status_history_thena_id ON thena_status_history(thena_id);
 `
 
 // CloseDB closes the database connection
