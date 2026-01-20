@@ -117,51 +117,71 @@ const migration001 = `
 
 CREATE TABLE IF NOT EXISTS thena_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    request_id VARCHAR(255) UNIQUE NOT NULL,
-    thena_id VARCHAR(255),
+    thena_id VARCHAR(255) UNIQUE NOT NULL,
+    request_id INTEGER,
     event_id VARCHAR(255),
     status VARCHAR(100),
     sub_status VARCHAR(255),
     sub_status_name VARCHAR(255),
-    sub_status_desc TEXT,
+    sub_status_description TEXT,
     customer_name VARCHAR(255),
-    crm_id VARCHAR(255),
-    crm_name VARCHAR(255),
+    crm_account_id VARCHAR(255),
+    crm_account_name VARCHAR(255),
     channel_id VARCHAR(255),
     channel_name VARCHAR(255),
+    description TEXT,
     permalink TEXT,
-    request_link TEXT,
     thena_url TEXT,
-    assigned_to_id VARCHAR(255),
-    assigned_to_name VARCHAR(255),
-    assigned_to_email VARCHAR(255),
     requestor_id VARCHAR(255),
     requestor_name VARCHAR(255),
     requestor_email VARCHAR(255),
+    requestor_domain VARCHAR(255),
+    assigned_to_id VARCHAR(255),
+    assigned_to_name VARCHAR(255),
+    assigned_to_email VARCHAR(255),
+    assigned_to_domain VARCHAR(255),
+    assigned_by_id VARCHAR(255),
+    assigned_by_name VARCHAR(255),
+    assigned_by_email VARCHAR(255),
+    assigned_by_domain VARCHAR(255),
+    sender_id VARCHAR(255),
+    sender_name VARCHAR(255),
+    sender_email VARCHAR(255),
+    sender_domain VARCHAR(255),
+    reply_count INTEGER DEFAULT 0,
+    first_response_at TIMESTAMP WITH TIME ZONE,
+    last_customer_message_at TIMESTAMP WITH TIME ZONE,
+    last_vendor_message_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    reply_count INTEGER DEFAULT 0,
-    description TEXT,
+    updated_at_db TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     received_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_thena_requests_thena_id ON thena_requests(thena_id);
 CREATE INDEX IF NOT EXISTS idx_thena_requests_request_id ON thena_requests(request_id);
 CREATE INDEX IF NOT EXISTS idx_thena_requests_customer_name ON thena_requests(customer_name);
 CREATE INDEX IF NOT EXISTS idx_thena_requests_status ON thena_requests(status);
 CREATE INDEX IF NOT EXISTS idx_thena_requests_sub_status ON thena_requests(sub_status);
 CREATE INDEX IF NOT EXISTS idx_thena_requests_created_at ON thena_requests(created_at);
+CREATE INDEX IF NOT EXISTS idx_thena_requests_updated_at ON thena_requests(updated_at);
 
 CREATE TABLE IF NOT EXISTS thena_status_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    request_id VARCHAR(255) NOT NULL,
-    old_status VARCHAR(100),
-    new_status VARCHAR(100),
-    old_sub_status VARCHAR(255),
-    new_sub_status VARCHAR(255),
+    thena_id VARCHAR(255) NOT NULL,
+    request_id INTEGER,
+    event_id VARCHAR(255),
+    from_status VARCHAR(100),
+    to_status VARCHAR(100),
+    from_sub_status VARCHAR(255),
+    to_sub_status VARCHAR(255),
+    from_sub_status_name VARCHAR(255),
+    to_sub_status_name VARCHAR(255),
     changed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    FOREIGN KEY (request_id) REFERENCES thena_requests(request_id) ON DELETE CASCADE
+    UNIQUE(event_id, to_status, to_sub_status)
 );
 
+CREATE INDEX IF NOT EXISTS idx_thena_status_history_thena_id ON thena_status_history(thena_id);
 CREATE INDEX IF NOT EXISTS idx_thena_status_history_request_id ON thena_status_history(request_id);
 CREATE INDEX IF NOT EXISTS idx_thena_status_history_changed_at ON thena_status_history(changed_at);
 `
