@@ -31,16 +31,63 @@ const ThenaBoardView = () => {
     return requests.filter(r => r.status === selectedStatus);
   }, [requests, selectedStatus]);
 
-  // Group filtered requests by subStatusName
+  // Define all possible columns in order
+  const ALL_COLUMNS = [
+    'Open',
+    'In Progress',
+    'Waiting for Us',
+    'Waiting for Feature Request',
+    'Waiting for Customer',
+    'Closed',
+    'NO STATUS'
+  ];
+
+  // Normalize subStatus names to match our defined columns
+  const normalizeSubStatus = (subStatusName) => {
+    if (!subStatusName) return 'NO STATUS';
+
+    const normalized = subStatusName.trim();
+
+    // Map common variations to our standard column names
+    const statusMap = {
+      'open': 'Open',
+      'in progress': 'In Progress',
+      'in_progress': 'In Progress',
+      'waiting for us': 'Waiting for Us',
+      'waiting_for_us': 'Waiting for Us',
+      'waiting for feature request': 'Waiting for Feature Request',
+      'waiting_for_feature_request': 'Waiting for Feature Request',
+      'waiting for customer': 'Waiting for Customer',
+      'waiting_for_customer': 'Waiting for Customer',
+      'closed': 'Closed',
+      'resolved': 'Closed',
+    };
+
+    const lowercaseNormalized = normalized.toLowerCase();
+    return statusMap[lowercaseNormalized] || normalized;
+  };
+
+  // Group filtered requests by subStatusName with all columns showing
   const groupedBySubStatus = useMemo(() => {
+    // Initialize all columns with empty arrays
     const groups = {};
-    filteredRequests.forEach(request => {
-      const subStatus = request.subStatusName || 'Unassigned';
-      if (!groups[subStatus]) {
-        groups[subStatus] = [];
-      }
-      groups[subStatus].push(request);
+    ALL_COLUMNS.forEach(column => {
+      groups[column] = [];
     });
+
+    // Add requests to their respective columns
+    filteredRequests.forEach(request => {
+      const normalizedStatus = normalizeSubStatus(request.subStatusName);
+
+      // If the normalized status matches one of our columns, use it
+      // Otherwise, add it to NO STATUS
+      if (ALL_COLUMNS.includes(normalizedStatus)) {
+        groups[normalizedStatus].push(request);
+      } else {
+        groups['NO STATUS'].push(request);
+      }
+    });
+
     return groups;
   }, [filteredRequests]);
 
@@ -246,14 +293,18 @@ const ThenaBoardView = () => {
               </div>
             ) : (
               <div className="thena-pipeline">
-                {Object.keys(groupedBySubStatus).sort().map(subStatus => (
-                  <div key={subStatus} className="pipeline-column">
+                {ALL_COLUMNS.map(columnName => (
+                  <div key={columnName} className="pipeline-column">
                     <div className="column-header">
-                      <h3 className="column-title">{subStatus}</h3>
-                      <span className="column-count">{groupedBySubStatus[subStatus].length}</span>
+                      <h3 className="column-title">{columnName}</h3>
+                      <span className="column-count">{groupedBySubStatus[columnName].length}</span>
                     </div>
                     <div className="column-cards">
-                      {groupedBySubStatus[subStatus].map(request => renderCard(request))}
+                      {groupedBySubStatus[columnName].length === 0 ? (
+                        <div className="empty-column-message">No items</div>
+                      ) : (
+                        groupedBySubStatus[columnName].map(request => renderCard(request))
+                      )}
                     </div>
                   </div>
                 ))}

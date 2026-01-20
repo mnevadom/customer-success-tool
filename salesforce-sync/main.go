@@ -14,23 +14,27 @@ import (
 
 // SalesforceClient handles authentication and API requests
 type SalesforceClient struct {
-	InstanceURL string
-	AccessToken string
-	Username    string
-	Password    string
-	Token       string
-	LoginURL    string
-	Connected   bool
+	InstanceURL   string
+	AccessToken   string
+	RefreshToken  string
+	Username      string
+	Password      string
+	Token         string
+	LoginURL      string
+	Connected     bool
+	ClientID      string
+	ClientSecret  string
 }
 
 // LoginResponse represents the OAuth response from Salesforce
 type LoginResponse struct {
-	AccessToken string `json:"access_token"`
-	InstanceURL string `json:"instance_url"`
-	ID          string `json:"id"`
-	TokenType   string `json:"token_type"`
-	IssuedAt    string `json:"issued_at"`
-	Signature   string `json:"signature"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	InstanceURL  string `json:"instance_url"`
+	ID           string `json:"id"`
+	TokenType    string `json:"token_type"`
+	IssuedAt     string `json:"issued_at"`
+	Signature    string `json:"signature"`
 }
 
 // SalesforceAccount represents a Salesforce Account object
@@ -92,11 +96,13 @@ var sfClient *SalesforceClient
 // Initialize Salesforce client
 func NewSalesforceClient() *SalesforceClient {
 	return &SalesforceClient{
-		Username: os.Getenv("SF_USERNAME"),
-		Password: os.Getenv("SF_PASSWORD"),
-		Token:    os.Getenv("SF_SECURITY_TOKEN"),
-		LoginURL: getEnvOrDefault("SF_LOGIN_URL", "https://login.salesforce.com"),
-		Connected: false,
+		Username:     os.Getenv("SF_USERNAME"),
+		Password:     os.Getenv("SF_PASSWORD"),
+		Token:        os.Getenv("SF_SECURITY_TOKEN"),
+		LoginURL:     getEnvOrDefault("SF_LOGIN_URL", "https://login.salesforce.com"),
+		ClientID:     os.Getenv("SF_CLIENT_ID"),
+		ClientSecret: os.Getenv("SF_CLIENT_SECRET"),
+		Connected:    false,
 	}
 }
 
@@ -200,7 +206,17 @@ func (sf *SalesforceClient) Query(soql string) (*QueryResponse, error) {
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		// Token expired, try to re-authenticate
+		// Token expired, try to refresh or re-authenticate
+		log.Println("Access token expired, attempting to refresh...")
+		if sf.RefreshToken != "" {
+			// Try refresh token first
+			if err := sf.RefreshAccessToken(); err == nil {
+				log.Println("Successfully refreshed token, retrying query...")
+				return sf.Query(soql)
+			}
+			log.Printf("Refresh token failed: %v", err)
+		}
+		// Fall back to password flow if available
 		sf.Connected = false
 		return sf.Query(soql)
 	}
@@ -464,6 +480,198 @@ func syncHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// OAuth 2.0 Web Server Flow - Initiate Authorization
+func oauthInitHandler(w http.ResponseWriter, r *http.Request) {
+	if sfClient.ClientID == "" {
+		http.Error(w, "SF_CLIENT_ID not configured", http.StatusInternalServerError)
+		return
+	}
+
+	// Get the callback URL from environment or construct it
+	callbackURL := os.Getenv("SF_CALLBACK_URL")
+	if callbackURL == "" {
+		// Construct default callback URL from request
+		scheme := "https"
+		if r.TLS == nil {
+			scheme = "http"
+		}
+		callbackURL = fmt.Sprintf("%s://%s/oauth/callback", scheme, r.Host)
+	}
+
+	// Build authorization URL
+	authURL := fmt.Sprintf("%s/services/oauth2/authorize?response_type=code&client_id=%s&redirect_uri=%s",
+		sfClient.LoginURL,
+		url.QueryEscape(sfClient.ClientID),
+		url.QueryEscape(callbackURL),
+	)
+
+	log.Printf("Initiating OAuth flow, redirecting to: %s", authURL)
+	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
+}
+
+// OAuth 2.0 Web Server Flow - Handle Callback
+func oauthCallbackHandler(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	errorParam := r.URL.Query().Get("error")
+	errorDesc := r.URL.Query().Get("error_description")
+
+	if errorParam != "" {
+		log.Printf("OAuth error: %s - %s", errorParam, errorDesc)
+		http.Error(w, fmt.Sprintf("OAuth error: %s - %s", errorParam, errorDesc), http.StatusBadRequest)
+		return
+	}
+
+	if code == "" {
+		http.Error(w, "No authorization code received", http.StatusBadRequest)
+		return
+	}
+
+	// Exchange code for access token
+	if err := exchangeCodeForToken(code, r.Host); err != nil {
+		log.Printf("Failed to exchange code for token: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to exchange code for token: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Success page
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, `
+		<!DOCTYPE html>
+		<html>
+		<head>
+			<title>Salesforce Connected</title>
+			<style>
+				body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f0f0f0; }
+				.success { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 500px; margin: 0 auto; }
+				.success h1 { color: #00a86b; }
+				.btn { display: inline-block; padding: 10px 20px; background: #0070d2; color: white; text-decoration: none; border-radius: 5px; margin-top: 20px; }
+			</style>
+		</head>
+		<body>
+			<div class="success">
+				<h1>✅ Successfully Connected to Salesforce!</h1>
+				<p>Your Salesforce integration is now active.</p>
+				<p>Instance URL: <strong>%s</strong></p>
+				<a href="/" class="btn">Return to Dashboard</a>
+			</div>
+		</body>
+		</html>
+	`, sfClient.InstanceURL)
+}
+
+// Exchange authorization code for access token
+func exchangeCodeForToken(code, host string) error {
+	if sfClient.ClientID == "" || sfClient.ClientSecret == "" {
+		return fmt.Errorf("SF_CLIENT_ID and SF_CLIENT_SECRET must be configured")
+	}
+
+	// Get callback URL
+	callbackURL := os.Getenv("SF_CALLBACK_URL")
+	if callbackURL == "" {
+		callbackURL = fmt.Sprintf("https://%s/oauth/callback", host)
+	}
+
+	tokenURL := sfClient.LoginURL + "/services/oauth2/token"
+
+	data := url.Values{}
+	data.Set("grant_type", "authorization_code")
+	data.Set("code", code)
+	data.Set("client_id", sfClient.ClientID)
+	data.Set("client_secret", sfClient.ClientSecret)
+	data.Set("redirect_uri", callbackURL)
+
+	req, err := http.NewRequest("POST", tokenURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return fmt.Errorf("failed to create token request: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("token request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("token exchange failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var loginResp LoginResponse
+	if err := json.Unmarshal(body, &loginResp); err != nil {
+		return fmt.Errorf("failed to parse token response: %v", err)
+	}
+
+	sfClient.AccessToken = loginResp.AccessToken
+	sfClient.RefreshToken = loginResp.RefreshToken
+	sfClient.InstanceURL = loginResp.InstanceURL
+	sfClient.Connected = true
+
+	log.Printf("✅ Successfully authenticated with Salesforce via OAuth: %s", sfClient.InstanceURL)
+	log.Printf("Access token obtained, refresh token: %s", sfClient.RefreshToken[:10]+"...")
+
+	return nil
+}
+
+// Refresh access token using refresh token
+func (sf *SalesforceClient) RefreshAccessToken() error {
+	if sf.RefreshToken == "" {
+		return fmt.Errorf("no refresh token available")
+	}
+
+	tokenURL := sf.LoginURL + "/services/oauth2/token"
+
+	data := url.Values{}
+	data.Set("grant_type", "refresh_token")
+	data.Set("refresh_token", sf.RefreshToken)
+	data.Set("client_id", sf.ClientID)
+	data.Set("client_secret", sf.ClientSecret)
+
+	req, err := http.NewRequest("POST", tokenURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return fmt.Errorf("failed to create refresh request: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("refresh request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("refresh failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var loginResp LoginResponse
+	if err := json.Unmarshal(body, &loginResp); err != nil {
+		return fmt.Errorf("failed to parse refresh response: %v", err)
+	}
+
+	sf.AccessToken = loginResp.AccessToken
+	// Refresh token might be updated, update if provided
+	if loginResp.RefreshToken != "" {
+		sf.RefreshToken = loginResp.RefreshToken
+	}
+
+	log.Printf("✅ Successfully refreshed Salesforce access token")
+	return nil
+}
+
 // CORS middleware
 func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -501,9 +709,19 @@ func main() {
 	http.HandleFunc("/api/clients/", enableCORS(getClientByIDHandler))
 	http.HandleFunc("/api/sync", enableCORS(syncHandler))
 
+	// OAuth 2.0 Web Server Flow routes
+	http.HandleFunc("/oauth/authorize", oauthInitHandler)
+	http.HandleFunc("/oauth/callback", oauthCallbackHandler)
+
 	port := getEnvOrDefault("PORT", "9000")
 	log.Printf("Starting Salesforce Sync service on port %s", port)
 	log.Printf("Login URL: %s", sfClient.LoginURL)
+
+	if sfClient.ClientID != "" {
+		log.Printf("OAuth 2.0 Web Server Flow enabled")
+		log.Printf("To connect, visit: https://salesforce-sync-agent-87kkzgw4nmq4.demo.okteto.dev/oauth/authorize")
+		log.Printf("Callback URL for Salesforce Connected App: https://salesforce-sync-agent-87kkzgw4nmq4.demo.okteto.dev/oauth/callback")
+	}
 
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatalf("Failed to start server: %v", err)

@@ -1,7 +1,16 @@
 import React from 'react';
+import { useQuery } from '@apollo/client';
+import { GET_PENDING_FEATURE_REQUESTS } from '../graphql/queries';
 import '../styles/OverviewView.css';
 
 const OverviewView = () => {
+  const { data: featureRequestsData, loading: featureRequestsLoading } = useQuery(
+    GET_PENDING_FEATURE_REQUESTS,
+    {
+      pollInterval: 60000, // Poll every minute
+    }
+  );
+
   const stats = {
     totalClients: 28,
     activeClients: 25,
@@ -12,6 +21,8 @@ const OverviewView = () => {
     avgSatisfaction: 87,
     totalARR: '$3,250,000'
   };
+
+  const pendingFeatureRequests = featureRequestsData?.pendingFeatureRequests || [];
 
   const recentActivity = [
     {
@@ -150,6 +161,50 @@ const OverviewView = () => {
       </div>
 
       <div className="overview-content">
+        {/* Pending Feature Requests */}
+        <div className="overview-section feature-requests-section">
+          <h2 className="section-title">
+            Pending Feature Requests
+            {!featureRequestsLoading && (
+              <span className="section-count">{pendingFeatureRequests.length}</span>
+            )}
+          </h2>
+          {featureRequestsLoading ? (
+            <div className="loading-inline">Loading feature requests...</div>
+          ) : pendingFeatureRequests.length === 0 ? (
+            <div className="empty-inline">No pending feature requests</div>
+          ) : (
+            <div className="feature-requests-list">
+              {pendingFeatureRequests.slice(0, 5).map((request) => (
+                <div key={request.id} className="feature-request-row">
+                  <div className="feature-request-info">
+                    <div className="feature-request-name">{request.name}</div>
+                    <div className="feature-request-customer">
+                      🏢 {request.customerName}
+                      {request.customersNumberOfRequests > 1 && (
+                        <span className="request-count-badge">
+                          {request.customersNumberOfRequests} requests
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {request.jiraLink && (
+                    <a
+                      href={request.jiraLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="jira-link-button"
+                      title="View in Jira"
+                    >
+                      {request.jiraKey || 'Jira'} →
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Top Clients */}
         <div className="overview-section">
           <h2 className="section-title">Top Clients by ARR</h2>

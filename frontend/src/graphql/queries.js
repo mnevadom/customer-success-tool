@@ -92,3 +92,87 @@ export const GET_THENA_REQUESTS = gql`
     }
   }
 `;
+
+export const GET_FEATURE_REQUESTS = gql`
+  query GetFeatureRequests {
+    featureRequests {
+      id
+      name
+      description
+      customerName
+      customersNumberOfRequests
+      jiraLink
+      jiraKey
+      status
+      priority
+      createdAt
+      updatedAt
+      createdBy
+      tags
+      estimatedEffort
+      targetRelease
+    }
+  }
+`;
+
+export const GET_PENDING_FEATURE_REQUESTS = gql`
+  query GetPendingFeatureRequests {
+    pendingFeatureRequests {
+      id
+      name
+      description
+      customerName
+      customersNumberOfRequests
+      jiraLink
+      jiraKey
+      status
+      priority
+      createdAt
+      updatedAt
+      createdBy
+      tags
+      estimatedEffort
+      targetRelease
+    }
+  }
+`;
+
+export const CREATE_FEATURE_REQUEST = gql`
+  mutation CreateFeatureRequest(
+    $name: String!
+    $description: String!
+    $customerName: String!
+    $customersNumberOfRequests: Int
+    $jiraLink: String
+    $jiraKey: String
+    $priority: String
+    $tags: [String]
+    $estimatedEffort: String
+    $targetRelease: String
+  ) {
+    createFeatureRequest(
+      name: $name
+      description: $description
+      customerName: $customerName
+      customersNumberOfRequests: $customersNumberOfRequests
+      jiraLink: $jiraLink
+      jiraKey: $jiraKey
+      priority: $priority
+      tags: $tags
+      estimatedEffort: $estimatedEffort
+      targetRelease: $targetRelease
+    ) {
+      id
+      name
+      description
+      customerName
+      customersNumberOfRequests
+      jiraLink
+      jiraKey
+      status
+      priority
+      createdAt
+      updatedAt
+    }
+  }
+`;

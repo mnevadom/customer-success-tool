@@ -7,6 +7,7 @@ import DashboardView from './components/DashboardView';
 import WarningsView from './components/WarningsView';
 import OverviewView from './components/OverviewView';
 import ThenaBoardView from './components/ThenaBoardView';
+import FeatureRequestsView from './components/FeatureRequestsView';
 import { GET_CLIENTS, GET_DASHBOARDS } from './graphql/queries';
 import './styles/theme.css';
 import './styles/App.css';
@@ -36,7 +37,7 @@ function App() {
       setSelectedDashboardId(null);
     } else if (tab === 'dashboards') {
       setSelectedClientId(null);
-    } else if (tab === 'warnings' || tab === 'overview') {
+    } else if (tab === 'warnings' || tab === 'overview' || tab === 'feature-requests') {
       setSelectedClientId(null);
       setSelectedDashboardId(null);
     }
@@ -51,8 +52,8 @@ function App() {
   };
 
   const renderSidebar = () => {
-    if (activeTab === 'warnings' || activeTab === 'overview') {
-      return null; // No sidebar for warnings and overview
+    if (activeTab === 'warnings' || activeTab === 'overview' || activeTab === 'feature-requests') {
+      return null; // No sidebar for warnings, overview, and feature requests
     }
 
     if (activeTab === 'information') {
@@ -145,6 +146,8 @@ function App() {
       return <DashboardView dashboardId={selectedDashboardId} />;
     } else if (activeTab === 'warnings') {
       return <WarningsView />;
+    } else if (activeTab === 'feature-requests') {
+      return <FeatureRequestsView />;
     }
   };
 

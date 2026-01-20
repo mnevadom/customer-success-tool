@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"customer-success-backend/db"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -389,6 +391,124 @@ func findDashboardByID(id string) *Dashboard {
 }
 
 // Handler for receiving webhook data from thena-sync
+// Helper to convert ThenaRequest to database model
+func convertToDBRequest(req ThenaRequest, payload map[string]interface{}) db.ThenaRequestDB {
+	// Helper to extract nested values
+	getNestedString := func(obj map[string]interface{}, key string) sql.NullString {
+		if val, ok := obj[key]; ok && val != nil {
+			return sql.NullString{String: fmt.Sprintf("%v", val), Valid: true}
+		}
+		return sql.NullString{Valid: false}
+	}
+
+	// Parse timestamps
+	parseTime := func(timeStr string) time.Time {
+		if timeStr == "" {
+			return time.Now()
+		}
+		t, err := time.Parse(time.RFC3339, timeStr)
+		if err != nil {
+			return time.Now()
+		}
+		return t
+	}
+
+	dbReq := db.ThenaRequestDB{
+		ThenaID:       req.ThenaID,
+		RequestID:     req.RequestID,
+		EventID:       req.EventID,
+		Status:        req.Status,
+		CustomerName:  req.CustomerName,
+		ReplyCount:    req.ReplyCount,
+		CreatedAt:     parseTime(req.CreatedAt),
+		UpdatedAt:     parseTime(req.UpdatedAt),
+		ReceivedAt:    req.ReceivedAt,
+	}
+
+	// Optional fields
+	if req.SubStatus != "" {
+		dbReq.SubStatus = sql.NullString{String: req.SubStatus, Valid: true}
+	}
+	if req.SubStatusName != "" {
+		dbReq.SubStatusName = sql.NullString{String: req.SubStatusName, Valid: true}
+	}
+	if req.SubStatusDesc != "" {
+		dbReq.SubStatusDescription = sql.NullString{String: req.SubStatusDesc, Valid: true}
+	}
+	if req.CRMID != "" {
+		dbReq.CRMAccountID = sql.NullString{String: req.CRMID, Valid: true}
+	}
+	if req.CRMName != "" {
+		dbReq.CRMAccountName = sql.NullString{String: req.CRMName, Valid: true}
+	}
+	if req.ChannelID != "" {
+		dbReq.ChannelID = sql.NullString{String: req.ChannelID, Valid: true}
+	}
+	if req.ChannelName != "" {
+		dbReq.ChannelName = sql.NullString{String: req.ChannelName, Valid: true}
+	}
+	if req.Description != "" {
+		dbReq.Description = sql.NullString{String: req.Description, Valid: true}
+	}
+	if req.Permalink != "" {
+		dbReq.Permalink = sql.NullString{String: req.Permalink, Valid: true}
+	}
+	if req.ThenaURL != "" {
+		dbReq.ThenaURL = sql.NullString{String: req.ThenaURL, Valid: true}
+	}
+	if req.RequestorID != "" {
+		dbReq.RequestorID = sql.NullString{String: req.RequestorID, Valid: true}
+	}
+	if req.RequestorName != "" {
+		dbReq.RequestorName = sql.NullString{String: req.RequestorName, Valid: true}
+	}
+	if req.RequestorEmail != "" {
+		dbReq.RequestorEmail = sql.NullString{String: req.RequestorEmail, Valid: true}
+	}
+	if req.AssignedToID != "" {
+		dbReq.AssignedToID = sql.NullString{String: req.AssignedToID, Valid: true}
+	}
+	if req.AssignedToName != "" {
+		dbReq.AssignedToName = sql.NullString{String: req.AssignedToName, Valid: true}
+	}
+	if req.AssignedToEmail != "" {
+		dbReq.AssignedToEmail = sql.NullString{String: req.AssignedToEmail, Valid: true}
+	}
+
+	// Extract additional nested fields from payload
+	if requestor, ok := payload["requestor"].(map[string]interface{}); ok {
+		dbReq.RequestorDomain = getNestedString(requestor, "domain")
+	}
+	if assignedTo, ok := payload["assignedTo"].(map[string]interface{}); ok {
+		dbReq.AssignedToDomain = getNestedString(assignedTo, "domain")
+	}
+	if assignedBy, ok := payload["assignedBy"].(map[string]interface{}); ok {
+		dbReq.AssignedByID = getNestedString(assignedBy, "id")
+		dbReq.AssignedByName = getNestedString(assignedBy, "name")
+		dbReq.AssignedByEmail = getNestedString(assignedBy, "email")
+		dbReq.AssignedByDomain = getNestedString(assignedBy, "domain")
+	}
+	if sender, ok := payload["sender"].(map[string]interface{}); ok {
+		dbReq.SenderID = getNestedString(sender, "id")
+		dbReq.SenderName = getNestedString(sender, "name")
+		dbReq.SenderEmail = getNestedString(sender, "email")
+		dbReq.SenderDomain = getNestedString(sender, "domain")
+	}
+
+	// Extract timing fields
+	if val, ok := payload["firstResponseAt"]; ok && val != nil {
+		dbReq.FirstResponseAt = sql.NullString{String: fmt.Sprintf("%v", val), Valid: true}
+	}
+	if val, ok := payload["lastCustomerMessageAt"]; ok && val != nil {
+		dbReq.LastCustomerMessageAt = sql.NullString{String: fmt.Sprintf("%v", val), Valid: true}
+	}
+	if val, ok := payload["lastVendorMessageAt"]; ok && val != nil {
+		dbReq.LastVendorMessageAt = sql.NullString{String: fmt.Sprintf("%v", val), Valid: true}
+	}
+
+	return dbReq
+}
+
 func thenaWebhookHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -471,12 +591,15 @@ func thenaWebhookHandler(w http.ResponseWriter, r *http.Request) {
 		thenaReq.RequestorEmail = getNestedString(requestor, "email")
 	}
 
-	// Store the request
-	thenaRequestsMutex.Lock()
-	thenaRequests = append(thenaRequests, thenaReq)
-	thenaRequestsMutex.Unlock()
+	// Convert to database model and save
+	dbReq := convertToDBRequest(thenaReq, payload)
+	if err := db.UpsertThenaRequest(dbReq); err != nil {
+		log.Printf("❌ Failed to save Thena request to database: %v", err)
+		http.Error(w, "Failed to save request", http.StatusInternalServerError)
+		return
+	}
 
-	log.Printf("✅ Stored Thena request: requestId=%d customer=%s status=%s",
+	log.Printf("✅ Saved Thena request to DB: requestId=%d customer=%s status=%s",
 		thenaReq.RequestID, thenaReq.CustomerName, thenaReq.Status)
 
 	w.WriteHeader(http.StatusOK)
@@ -484,6 +607,14 @@ func thenaWebhookHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	// Initialize database connection
+	if err := db.InitDB(); err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer db.CloseDB()
+
+	log.Println("✅ Database initialized successfully")
+
 	// Define GraphQL types
 	widgetType := graphql.NewObject(graphql.ObjectConfig{
 		Name: "Widget",
@@ -691,6 +822,58 @@ func main() {
 		},
 	})
 
+	// Feature Request GraphQL type
+	featureRequestType := graphql.NewObject(graphql.ObjectConfig{
+		Name: "FeatureRequest",
+		Fields: graphql.Fields{
+			"id": &graphql.Field{
+				Type: graphql.String,
+			},
+			"name": &graphql.Field{
+				Type: graphql.String,
+			},
+			"description": &graphql.Field{
+				Type: graphql.String,
+			},
+			"customerName": &graphql.Field{
+				Type: graphql.String,
+			},
+			"customersNumberOfRequests": &graphql.Field{
+				Type: graphql.Int,
+			},
+			"jiraLink": &graphql.Field{
+				Type: graphql.String,
+			},
+			"jiraKey": &graphql.Field{
+				Type: graphql.String,
+			},
+			"status": &graphql.Field{
+				Type: graphql.String,
+			},
+			"priority": &graphql.Field{
+				Type: graphql.String,
+			},
+			"createdAt": &graphql.Field{
+				Type: graphql.String,
+			},
+			"updatedAt": &graphql.Field{
+				Type: graphql.String,
+			},
+			"createdBy": &graphql.Field{
+				Type: graphql.String,
+			},
+			"tags": &graphql.Field{
+				Type: graphql.NewList(graphql.String),
+			},
+			"estimatedEffort": &graphql.Field{
+				Type: graphql.String,
+			},
+			"targetRelease": &graphql.Field{
+				Type: graphql.String,
+			},
+		},
+	})
+
 	// Define root query
 	rootQuery := graphql.NewObject(graphql.ObjectConfig{
 		Name: "Query",
@@ -757,15 +940,173 @@ func main() {
 				Type:        graphql.NewList(thenaRequestType),
 				Description: "Get list of all Thena webhook requests",
 				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
-					thenaRequestsMutex.Lock()
-					defer thenaRequestsMutex.Unlock()
-					log.Printf("Query: thenaRequests - returning %d requests", len(thenaRequests))
-					// Return in reverse order (newest first)
-					result := make([]ThenaRequest, len(thenaRequests))
-					for i, req := range thenaRequests {
-						result[len(thenaRequests)-1-i] = req
+					// Query from database
+					dbRequests, err := db.GetAllThenaRequests()
+					if err != nil {
+						log.Printf("❌ Error querying thena requests from database: %v", err)
+						return nil, err
+					}
+
+					log.Printf("Query: thenaRequests - returning %d requests from database", len(dbRequests))
+
+					// Convert database model to API model
+					result := make([]ThenaRequest, len(dbRequests))
+					for i, dbReq := range dbRequests {
+						result[i] = ThenaRequest{
+							ID:              dbReq.ID,
+							RequestID:       dbReq.RequestID,
+							ThenaID:         dbReq.ThenaID,
+							EventID:         dbReq.EventID,
+							Status:          dbReq.Status,
+							SubStatus:       dbReq.SubStatus.String,
+							SubStatusName:   dbReq.SubStatusName.String,
+							SubStatusDesc:   dbReq.SubStatusDescription.String,
+							CustomerName:    dbReq.CustomerName,
+							CRMID:           dbReq.CRMAccountID.String,
+							CRMName:         dbReq.CRMAccountName.String,
+							ChannelID:       dbReq.ChannelID.String,
+							ChannelName:     dbReq.ChannelName.String,
+							Permalink:       dbReq.Permalink.String,
+							ThenaURL:        dbReq.ThenaURL.String,
+							AssignedToID:    dbReq.AssignedToID.String,
+							AssignedToName:  dbReq.AssignedToName.String,
+							AssignedToEmail: dbReq.AssignedToEmail.String,
+							RequestorID:     dbReq.RequestorID.String,
+							RequestorName:   dbReq.RequestorName.String,
+							RequestorEmail:  dbReq.RequestorEmail.String,
+							CreatedAt:       dbReq.CreatedAt.Format(time.RFC3339),
+							UpdatedAt:       dbReq.UpdatedAt.Format(time.RFC3339),
+							ReplyCount:      dbReq.ReplyCount,
+							Description:     dbReq.Description.String,
+							ReceivedAt:      dbReq.ReceivedAt,
+						}
 					}
 					return result, nil
+				},
+			},
+			"featureRequests": &graphql.Field{
+				Type:        graphql.NewList(featureRequestType),
+				Description: "Get list of all feature requests",
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					dbRequests, err := db.GetAllFeatureRequests()
+					if err != nil {
+						log.Printf("❌ Error querying feature requests from database: %v", err)
+						return nil, err
+					}
+
+					log.Printf("Query: featureRequests - returning %d requests from database", len(dbRequests))
+					return dbRequests, nil
+				},
+			},
+			"pendingFeatureRequests": &graphql.Field{
+				Type:        graphql.NewList(featureRequestType),
+				Description: "Get list of pending feature requests",
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					dbRequests, err := db.GetPendingFeatureRequests()
+					if err != nil {
+						log.Printf("❌ Error querying pending feature requests from database: %v", err)
+						return nil, err
+					}
+
+					log.Printf("Query: pendingFeatureRequests - returning %d pending requests from database", len(dbRequests))
+					return dbRequests, nil
+				},
+			},
+		},
+	})
+
+	// Define root mutation
+	rootMutation := graphql.NewObject(graphql.ObjectConfig{
+		Name: "Mutation",
+		Fields: graphql.Fields{
+			"createFeatureRequest": &graphql.Field{
+				Type:        featureRequestType,
+				Description: "Create a new feature request",
+				Args: graphql.FieldConfigArgument{
+					"name": &graphql.ArgumentConfig{
+						Type: graphql.NewNonNull(graphql.String),
+					},
+					"description": &graphql.ArgumentConfig{
+						Type: graphql.NewNonNull(graphql.String),
+					},
+					"customerName": &graphql.ArgumentConfig{
+						Type: graphql.NewNonNull(graphql.String),
+					},
+					"customersNumberOfRequests": &graphql.ArgumentConfig{
+						Type:         graphql.Int,
+						DefaultValue: 1,
+					},
+					"jiraLink": &graphql.ArgumentConfig{
+						Type: graphql.String,
+					},
+					"jiraKey": &graphql.ArgumentConfig{
+						Type: graphql.String,
+					},
+					"priority": &graphql.ArgumentConfig{
+						Type: graphql.String,
+					},
+					"tags": &graphql.ArgumentConfig{
+						Type: graphql.NewList(graphql.String),
+					},
+					"estimatedEffort": &graphql.ArgumentConfig{
+						Type: graphql.String,
+					},
+					"targetRelease": &graphql.ArgumentConfig{
+						Type: graphql.String,
+					},
+				},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					name := p.Args["name"].(string)
+					description := p.Args["description"].(string)
+					customerName := p.Args["customerName"].(string)
+					customersNumber := 1
+					if val, ok := p.Args["customersNumberOfRequests"].(int); ok {
+						customersNumber = val
+					}
+
+					req := db.FeatureRequestDB{
+						Name:                      name,
+						Description:               description,
+						CustomerName:              customerName,
+						CustomersNumberOfRequests: customersNumber,
+						Status:                    "pending",
+					}
+
+					if jiraLink, ok := p.Args["jiraLink"].(string); ok && jiraLink != "" {
+						req.JiraLink = sql.NullString{String: jiraLink, Valid: true}
+					}
+					if jiraKey, ok := p.Args["jiraKey"].(string); ok && jiraKey != "" {
+						req.JiraKey = sql.NullString{String: jiraKey, Valid: true}
+					}
+					if priority, ok := p.Args["priority"].(string); ok && priority != "" {
+						req.Priority = sql.NullString{String: priority, Valid: true}
+					}
+					if estimatedEffort, ok := p.Args["estimatedEffort"].(string); ok && estimatedEffort != "" {
+						req.EstimatedEffort = sql.NullString{String: estimatedEffort, Valid: true}
+					}
+					if targetRelease, ok := p.Args["targetRelease"].(string); ok && targetRelease != "" {
+						req.TargetRelease = sql.NullString{String: targetRelease, Valid: true}
+					}
+					if tags, ok := p.Args["tags"].([]interface{}); ok && len(tags) > 0 {
+						stringTags := make([]string, len(tags))
+						for i, tag := range tags {
+							stringTags[i] = tag.(string)
+						}
+						req.Tags = stringTags
+					}
+
+					id, err := db.CreateFeatureRequest(req)
+					if err != nil {
+						log.Printf("❌ Error creating feature request: %v", err)
+						return nil, err
+					}
+
+					req.ID = id
+					req.CreatedAt = time.Now()
+					req.UpdatedAt = time.Now()
+
+					log.Printf("✅ Created feature request: %s", name)
+					return req, nil
 				},
 			},
 		},
@@ -773,7 +1114,8 @@ func main() {
 
 	// Create schema
 	schema, err := graphql.NewSchema(graphql.SchemaConfig{
-		Query: rootQuery,
+		Query:    rootQuery,
+		Mutation: rootMutation,
 	})
 	if err != nil {
 		log.Fatalf("Failed to create GraphQL schema: %v", err)

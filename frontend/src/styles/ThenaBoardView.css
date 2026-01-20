@@ -190,6 +190,14 @@
   gap: 1rem;
 }
 
+.empty-column-message {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: #a0aec0;
+  font-size: 0.875rem;
+  font-style: italic;
+}
+
 .empty-state-inline {
   display: flex;
   align-items: center;

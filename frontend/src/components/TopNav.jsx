@@ -24,6 +24,12 @@ const TopNav = ({ activeTab, onTabChange }) => {
           DASHBOARDS
         </button>
         <button
+          className={`top-nav-tab ${activeTab === 'feature-requests' ? 'active' : ''}`}
+          onClick={() => onTabChange('feature-requests')}
+        >
+          FEATURE REQUESTS
+        </button>
+        <button
           className={`top-nav-tab ${activeTab === 'warnings' ? 'active' : ''}`}
           onClick={() => onTabChange('warnings')}
         >
