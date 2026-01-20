@@ -20,3 +20,12 @@ npm-debug.log*
 .idea/
 *.swp
 *.swo
+
+# Salesforce JWT Keys - NEVER COMMIT THESE!
+private_key.pem
+*.key
+*.pem
+!public_cert.pem
+*_key.pem
+server.key
+client.key
