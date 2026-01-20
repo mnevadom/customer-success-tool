@@ -18,17 +18,44 @@ ingress:
       - path: /
         pathType: Prefix
 
+# JWT Bearer OAuth Flow - Required Environment Variables
 env:
   - name: PORT
     value: "9000"
-  - name: SF_USERNAME
-    value: ""
-  - name: SF_PASSWORD
-    value: ""
-  - name: SF_SECURITY_TOKEN
-    value: ""
-  - name: SF_LOGIN_URL
-    value: "https://login.salesforce.com"
+  # Required for JWT Bearer Flow
+  - name: SALESFORCE_CLIENT_ID
+    value: ""  # Set via --set or from secret
+  - name: SALESFORCE_USERNAME
+    value: ""  # Set via --set or from secret
+  - name: SALESFORCE_AUD
+    value: "https://login.salesforce.com"  # or https://test.salesforce.com for sandbox
+  - name: SALESFORCE_PRIVATE_KEY_PATH
+    value: "/secrets/private_key.pem"
+  # Optional - will use defaults if not set
+  - name: SALESFORCE_API_VERSION
+    value: "v58.0"
+  - name: SALESFORCE_HTTP_TIMEOUT_MS
+    value: "15000"
+  - name: SALESFORCE_MAX_RETRIES
+    value: "3"
+  - name: SALESFORCE_BACKOFF_BASE_MS
+    value: "200"
+  - name: SALESFORCE_ENABLE_CACHE
+    value: "false"
+  - name: SALESFORCE_CACHE_TTL_SECONDS
+    value: "300"
+
+# Volume for private key secret
+volumes:
+  - name: salesforce-key
+    secret:
+      secretName: salesforce-jwt-key
+      optional: true  # Don't fail if secret doesn't exist yet
+
+volumeMounts:
+  - name: salesforce-key
+    mountPath: /secrets
+    readOnly: true
 
 resources:
   limits:
@@ -44,6 +71,7 @@ livenessProbe:
     port: 9000
   initialDelaySeconds: 30
   periodSeconds: 10
+  failureThreshold: 5  # Allow more failures since service needs valid credentials
 
 readinessProbe:
   httpGet:
@@ -51,3 +79,4 @@ readinessProbe:
     port: 9000
   initialDelaySeconds: 5
   periodSeconds: 5
+  failureThreshold: 3

@@ -38,18 +38,16 @@ deploy:
         --set image.tag=${OKTETO_BUILD_SALESFORCE_SYNC_IMAGE##*:} \
         --set env[0].name="PORT" \
         --set env[0].value="9000" \
-        --set env[1].name="SF_USERNAME" \
-        --set env[1].value="${SF_USERNAME:-}" \
-        --set env[2].name="SF_PASSWORD" \
-        --set env[2].value="${SF_PASSWORD:-}" \
-        --set env[3].name="SF_SECURITY_TOKEN" \
-        --set env[3].value="${SF_SECURITY_TOKEN:-}" \
-        --set env[4].name="SF_CLIENT_ID" \
-        --set env[4].value="${SF_CLIENT_ID:-}" \
-        --set env[5].name="SF_CLIENT_SECRET" \
-        --set env[5].value="${SF_CLIENT_SECRET:-}" \
-        --set env[6].name="SF_LOGIN_URL" \
-        --set env[6].value="${SF_LOGIN_URL:-https://login.salesforce.com}" \
+        --set env[1].name="SALESFORCE_CLIENT_ID" \
+        --set env[1].value="${SALESFORCE_CLIENT_ID:-}" \
+        --set env[2].name="SALESFORCE_USERNAME" \
+        --set env[2].value="${SALESFORCE_USERNAME:-}" \
+        --set env[3].name="SALESFORCE_AUD" \
+        --set env[3].value="${SALESFORCE_AUD:-https://login.salesforce.com}" \
+        --set env[4].name="SALESFORCE_PRIVATE_KEY_PATH" \
+        --set env[4].value="/secrets/private_key.pem" \
+        --set env[5].name="SALESFORCE_API_VERSION" \
+        --set env[5].value="${SALESFORCE_API_VERSION:-v58.0}" \
         --wait
 
   - name: Deploy thena-sync with Helm
