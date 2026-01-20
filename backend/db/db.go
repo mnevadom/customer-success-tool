@@ -82,6 +82,11 @@ func runMigrations() error {
 		return err
 	}
 
+	// Migration 004: Add UNIQUE constraint for ON CONFLICT
+	if err := applyMigration("004", "Add UNIQUE constraint to thena_status_history", migration004); err != nil {
+		return err
+	}
+
 	log.Println("✅ All migrations applied successfully")
 	return nil
 }
@@ -395,6 +400,25 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_thena_requests_thena_id ON thena_requests(thena_id);
 CREATE INDEX IF NOT EXISTS idx_thena_requests_updated_at ON thena_requests(updated_at);
 CREATE INDEX IF NOT EXISTS idx_thena_status_history_thena_id ON thena_status_history(thena_id);
+`
+
+const migration004 = `
+-- Migration: 004_add_unique_constraint.sql
+-- Description: Add UNIQUE constraint to thena_status_history for ON CONFLICT clause
+
+DO $$
+BEGIN
+    -- Add UNIQUE constraint for ON CONFLICT in insertStatusHistory
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conname = 'thena_status_history_event_status_key') THEN
+        ALTER TABLE thena_status_history
+        ADD CONSTRAINT thena_status_history_event_status_key
+        UNIQUE (event_id, to_status, to_sub_status);
+        RAISE NOTICE 'Added UNIQUE constraint thena_status_history_event_status_key';
+    ELSE
+        RAISE NOTICE 'UNIQUE constraint thena_status_history_event_status_key already exists';
+    END IF;
+END $$;
 `
 
 // CloseDB closes the database connection
