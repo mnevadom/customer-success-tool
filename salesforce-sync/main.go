@@ -702,6 +702,16 @@ func mapAccountToClient(account SalesforceAccount) Client {
 }
 
 // HTTP Handlers
+func readyHandler(w http.ResponseWriter, r *http.Request) {
+	// Simple readiness check - just confirm the service is running
+	// This doesn't require Salesforce to be configured
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status": "ready",
+	})
+}
+
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -811,11 +821,13 @@ func main() {
 
 	// Setup HTTP routes
 	http.HandleFunc("/health", healthHandler)
+	http.HandleFunc("/ready", readyHandler)
 	http.HandleFunc("/clients", clientsHandler)
 	http.HandleFunc("/clients/", clientHandler)
 
 	port := getEnvOrDefault("PORT", "8080")
 	log.Printf("✅ Salesforce Integration Service started on port %s", port)
+	log.Printf("   Ready endpoint: http://localhost:%s/ready", port)
 	log.Printf("   Health endpoint: http://localhost:%s/health", port)
 	log.Printf("   Clients endpoint: http://localhost:%s/clients", port)
 
